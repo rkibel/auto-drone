@@ -1,0 +1,10 @@
+build/
+install/
+log/
+frames/
+frames3d*/
+frames*_test/
+frames*_profile/
+__pycache__/
+*.pyc
+.pytest_cache/

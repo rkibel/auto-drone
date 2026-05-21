@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cleanup Auto Drone"
+  short_description: "Find and remove auto-drone dead code."
+  default_prompt: "Clean up the auto-drone repository by finding dead code, stale files, obsolete references, and generated artifacts; fix issues and rerun checks until clean."
