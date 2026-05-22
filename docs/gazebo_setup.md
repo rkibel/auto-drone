@@ -150,3 +150,45 @@ The next visual-realism step is to add a controlled model asset pipeline:
 - PX4 or ArduPilot SITL for realistic multirotor motion
 
 Keep the mapper-facing topic contract stable while improving the simulator underneath it.
+
+## PX4 RGB-D Autonomy Path
+
+The first closed-loop multirotor path is centered on PX4 SITL and RGB-D mapping. It keeps the same mapper/planner core, but replaces manual `/cmd_vel` motion with PX4 offboard setpoints:
+
+```text
+RGB-D depth image + camera info + PX4 odometry or SLAM pose
+-> RangeFrame
+-> BeliefVolume
+-> discovery waypoint
+-> /fmu/in/offboard_control_mode + /fmu/in/trajectory_setpoint
+```
+
+The package installs:
+
+- `launch/gazebo_px4_autonomy.launch.py`
+- `config/px4_autonomy.yaml`
+- `worlds/px4_reconstruction_world.sdf`
+- `auto_drone px4_autonomy_node`
+
+Run the autonomy node after PX4 SITL, Gazebo, and the required bridges are active:
+
+```bash
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 launch auto_drone gazebo_px4_autonomy.launch.py
+```
+
+Required topics:
+
+```text
+/camera/image
+/camera/depth/image
+/camera/depth/camera_info
+/fmu/out/vehicle_odometry
+/fmu/out/vehicle_status
+/fmu/in/offboard_control_mode
+/fmu/in/trajectory_setpoint
+/fmu/in/vehicle_command
+```
+
+By default the node uses PX4 odometry as the pose source. To use visual SLAM, publish `geometry_msgs/msg/PoseStamped` and set `slam_pose_topic` plus `use_slam_pose:=true` in `config/px4_autonomy.yaml` or as launch overrides. If PX4 does not report armed offboard mode after setpoints begin, the node logs a preflight/mode warning instead of silently failing.

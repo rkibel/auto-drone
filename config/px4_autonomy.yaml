@@ -1,0 +1,28 @@
+auto_drone_px4_autonomy:
+  ros__parameters:
+    depth_topic: /camera/depth/image
+    rgb_topic: /camera/image
+    camera_info_topic: /camera/depth/camera_info
+    px4_odom_topic: /fmu/out/vehicle_odometry
+    px4_status_topic: /fmu/out/vehicle_status
+    slam_pose_topic: ""
+    use_slam_pose: false
+    width: 128
+    height: 128
+    depth: 32
+    resolution: 0.25
+    origin_x: -16.0
+    origin_y: -16.0
+    origin_z: 0.0
+    min_depth_m: 0.25
+    max_depth_m: 8.0
+    depth_stride: 8
+    planning_period_sec: 1.0
+    pose_timeout_sec: 0.5
+    depth_timeout_sec: 0.5
+    clearance_voxels: 1
+    max_speed_mps: 1.2
+    max_yaw_rate_rps: 0.8
+    position_tolerance_m: 0.35
+    arm_and_offboard: true
+    log_every: 10

@@ -14,12 +14,20 @@ setup(
             [
                 "launch/gazebo_lidar_bridge.launch.py",
                 "launch/gazebo_lidar_demo.launch.py",
+                "launch/gazebo_px4_autonomy.launch.py",
+            ],
+        ),
+        (
+            f"share/{package_name}/config",
+            [
+                "config/px4_autonomy.yaml",
             ],
         ),
         (
             f"share/{package_name}/worlds",
             [
                 "worlds/drone_reconstruction_world.sdf",
+                "worlds/px4_reconstruction_world.sdf",
             ],
         ),
     ],
@@ -34,6 +42,7 @@ setup(
         "console_scripts": [
             "headless_3d_runner = auto_drone.headless_3d_runner:main",
             "gazebo_lidar_bridge = auto_drone.gazebo_lidar_bridge:main",
+            "px4_autonomy_node = auto_drone.px4_autonomy_node:main",
         ],
     },
 )

@@ -1,0 +1,115 @@
+<?xml version="1.0" ?>
+<sdf version="1.8">
+  <world name="px4_reconstruction_world">
+    <plugin filename="libignition-gazebo-physics-system.so" name="ignition::gazebo::systems::Physics"/>
+    <plugin filename="libignition-gazebo-user-commands-system.so" name="ignition::gazebo::systems::UserCommands"/>
+    <plugin filename="libignition-gazebo-scene-broadcaster-system.so" name="ignition::gazebo::systems::SceneBroadcaster"/>
+    <plugin filename="libignition-gazebo-sensors-system.so" name="ignition::gazebo::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+
+    <gravity>0 0 -9.8</gravity>
+
+    <light name="sun" type="directional">
+      <pose>-3 4 10 0 0 0</pose>
+      <diffuse>0.85 0.82 0.76 1</diffuse>
+      <specular>0.25 0.25 0.25 1</specular>
+      <direction>-0.45 0.35 -1</direction>
+    </light>
+
+    <model name="floor_grid">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision"><geometry><plane><normal>0 0 1</normal><size>28 28</size></plane></geometry></collision>
+        <visual name="visual">
+          <geometry><plane><normal>0 0 1</normal><size>28 28</size></plane></geometry>
+          <material><ambient>0.30 0.33 0.34 1</ambient><diffuse>0.30 0.33 0.34 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="north_boundary">
+      <static>true</static>
+      <pose>0 7 1.1 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>14 0.20 2.2</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>14 0.20 2.2</size></box></geometry></visual>
+      </link>
+    </model>
+    <model name="south_boundary">
+      <static>true</static>
+      <pose>0 -7 1.1 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>14 0.20 2.2</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>14 0.20 2.2</size></box></geometry></visual>
+      </link>
+    </model>
+    <model name="east_boundary">
+      <static>true</static>
+      <pose>7 0 1.1 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.20 14 2.2</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.20 14 2.2</size></box></geometry></visual>
+      </link>
+    </model>
+    <model name="west_boundary">
+      <static>true</static>
+      <pose>-7 0 1.1 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.20 14 2.2</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.20 14 2.2</size></box></geometry></visual>
+      </link>
+    </model>
+
+    <model name="inspection_tower">
+      <static>true</static>
+      <pose>2.6 1.5 1.25 0 0 0.28</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.85 0.85 2.5</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>0.85 0.85 2.5</size></box></geometry><material><diffuse>0.57 0.19 0.12 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="damaged_wall_panel">
+      <static>true</static>
+      <pose>-2.8 1.8 1.15 0 0 -0.35</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>2.2 0.35 2.3</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>2.2 0.35 2.3</size></box></geometry><material><diffuse>0.18 0.31 0.37 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="low_equipment_rack">
+      <static>true</static>
+      <pose>-2.2 -2.3 0.55 0 0 0.25</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>1.9 0.55 1.1</size></box></geometry></collision>
+        <visual name="visual"><geometry><box><size>1.9 0.55 1.1</size></box></geometry><material><diffuse>0.11 0.38 0.24 1</diffuse></material></visual>
+      </link>
+    </model>
+    <model name="overhead_pipe">
+      <static>true</static>
+      <pose>0.0 -3.1 1.75 1.5708 0 1.5708</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.16</radius><length>4.8</length></cylinder></geometry></collision>
+        <visual name="visual"><geometry><cylinder><radius>0.16</radius><length>4.8</length></cylinder></geometry><material><diffuse>0.58 0.52 0.31 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <model name="rgbd_reference_pod">
+      <static>true</static>
+      <pose>0 0 1.0 0 0 0</pose>
+      <link name="link">
+        <sensor name="rgbd_camera" type="rgbd_camera">
+          <topic>/camera</topic>
+          <update_rate>15</update_rate>
+          <always_on>true</always_on>
+          <visualize>true</visualize>
+          <camera>
+            <horizontal_fov>1.047</horizontal_fov>
+            <image><width>320</width><height>240</height><format>R8G8B8</format></image>
+            <clip><near>0.25</near><far>8.0</far></clip>
+          </camera>
+        </sensor>
+      </link>
+    </model>
+  </world>
+</sdf>

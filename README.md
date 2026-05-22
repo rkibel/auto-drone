@@ -58,6 +58,37 @@ ros2 topic pub /cmd_vel geometry_msgs/msg/Twist \
   "{linear: {x: 0.45}, angular: {z: 0.25}}" -r 5
 ```
 
+## PX4 RGB-D Autonomy Path
+
+The PX4 v1 path adds the closed-loop simulator-facing pipeline:
+
+```text
+Gazebo RGB-D + PX4 odometry or SLAM pose
+-> depth ray RangeFrame
+-> BeliefVolume
+-> discovery planner
+-> PX4 offboard velocity setpoints
+```
+
+It is installed as:
+
+```bash
+ros2 launch auto_drone gazebo_px4_autonomy.launch.py
+```
+
+The launch expects PX4 SITL and the Gazebo/ROS bridge to provide:
+
+- `/camera/image`
+- `/camera/depth/image`
+- `/camera/depth/camera_info`
+- `/fmu/out/vehicle_odometry`
+- `/fmu/out/vehicle_status`
+- `/fmu/in/offboard_control_mode`
+- `/fmu/in/trajectory_setpoint`
+- `/fmu/in/vehicle_command`
+
+Configuration lives in `config/px4_autonomy.yaml`. The package also installs `worlds/px4_reconstruction_world.sdf`, a PX4-oriented reconstruction arena with bounded obstacles and an RGB-D reference sensor. PX4 model spawning and bridge startup remain external so the mapper/planner is not tied to a specific PX4 checkout layout.
+
 ## Architecture
 
 The active mapping loop is structured like a future simulator bridge:
@@ -78,9 +109,14 @@ Important modules:
 - `common.py`: shared occupancy constants, angle math, clamping, color blending
 - `geometry3d.py`: pose, orientation, cached 3D rays, voxel lines
 - `sensing3d.py`: synthetic range/depth frame generation
+- `interfaces3d.py`: metric pose, voxel-grid, camera, pose-source, and command target data contracts
+- `pose_sources.py`: PX4 odometry and ROS SLAM pose-source adapters
+- `rgbd_mapping.py`: RGB-D/depth image conversion into local range-frame rays
 - `odometry3d.py`: noisy estimated pose tracking
 - `mapping3d.py`: range-frame integration into the belief volume
 - `slam3d.py`: keyframes and relative-pose constraints
+- `autonomy3d.py`: safe discovery planning on bounded belief volumes
+- `px4_autonomy_node.py`: ROS 2/PX4 closed-loop autonomy node
 - `core3d.py`: seeded voxel world, belief volume, active mapping loop, planner
 - `render3d.py`: isometric voxel rendering
 - `headless_3d_runner.py`: CLI runner and video generation
