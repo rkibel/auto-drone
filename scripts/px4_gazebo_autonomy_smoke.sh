@@ -109,11 +109,12 @@ configure_gazebo_env() {
     export PATH="$GZ_PREFIX/bin:$HOME/.local/bin:$PATH"
     export CMAKE_PREFIX_PATH="$GZ_PREFIX:${CMAKE_PREFIX_PATH:-}"
     export PKG_CONFIG_PATH="$GZ_PREFIX/lib/x86_64-linux-gnu/pkgconfig:$GZ_PREFIX/share/pkgconfig:${PKG_CONFIG_PATH:-}"
-    export LD_LIBRARY_PATH="$GZ_PREFIX/lib/x86_64-linux-gnu:$GZ_PREFIX/lib/x86_64-linux-gnu/gz-sim-8/plugins:$GZ_PREFIX/lib/x86_64-linux-gnu/gz-physics-7/engine-plugins:${LD_LIBRARY_PATH:-}"
+    export LD_LIBRARY_PATH="$GZ_PREFIX/lib/x86_64-linux-gnu:$GZ_PREFIX/lib/x86_64-linux-gnu/OGRE-2.3:$GZ_PREFIX/lib/x86_64-linux-gnu/gz-sim-8/plugins:$GZ_PREFIX/lib/x86_64-linux-gnu/gz-physics-7/engine-plugins:$GZ_PREFIX/lib/x86_64-linux-gnu/gz-rendering-8/engine-plugins:${LD_LIBRARY_PATH:-}"
     export GZ_CONFIG_PATH="$GZ_PREFIX/share/gz:${GZ_CONFIG_PATH:-}"
     export RUBYLIB="$GZ_PREFIX/lib/ruby:$GZ_PREFIX/lib/x86_64-linux-gnu/ruby:${RUBYLIB:-}"
     export GZ_SIM_SYSTEM_PLUGIN_PATH="$GZ_PREFIX/lib/x86_64-linux-gnu/gz-sim-8/plugins:$GZ_PREFIX/lib/x86_64-linux-gnu:${GZ_SIM_SYSTEM_PLUGIN_PATH:-}"
     export GZ_SIM_PHYSICS_ENGINE_PATH="$GZ_PREFIX/lib/x86_64-linux-gnu/gz-physics-7/engine-plugins:$GZ_PREFIX/lib/x86_64-linux-gnu/gz-physics-6/engine-plugins:${GZ_SIM_PHYSICS_ENGINE_PATH:-}"
+    export GZ_RENDERING_ENGINE_PATH="$GZ_PREFIX/lib/x86_64-linux-gnu/gz-rendering-8/engine-plugins:$GZ_PREFIX/lib/x86_64-linux-gnu/gz-rendering-7/engine-plugins:${GZ_RENDERING_ENGINE_PATH:-}"
   fi
 
   if [[ -d "$PX4_DIR/Tools/simulation/gz/models" ]]; then
