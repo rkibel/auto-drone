@@ -250,10 +250,14 @@ WORKSPACE_SETUP=~/auto-drone-validation-ws/install/setup.bash \
 GZ_PREFIX=~/gz_user_prefix/usr \
 GZ_IP=127.0.0.1 \
 GZ_PARTITION=auto_drone_px4 \
+GZ_USE_XVFB=1 \
+GZ_RENDER_ENGINE=ogre \
 PX4_GZ_STANDALONE=1 \
 START_GZ_SERVER=1 \
 scripts/px4_gazebo_autonomy_smoke.sh
 ```
+
+`GZ_USE_XVFB=1` is useful on headless Linux hosts where Gazebo depth cameras need an X display. The runner starts `Xvfb`, selects software OpenGL, and passes the render engine through to both Gazebo and PX4.
 
 For local topic names that differ from the defaults, pass launch overrides rather than editing the config:
 

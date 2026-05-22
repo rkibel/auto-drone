@@ -118,6 +118,8 @@ On hosts that use a user-local Gazebo install, point `GZ_PREFIX` at the extracte
 PX4_DIR=~/PX4-Autopilot-v1.15 \
 WORKSPACE_SETUP=~/auto-drone-validation-ws/install/setup.bash \
 GZ_PREFIX=~/gz_user_prefix/usr \
+GZ_USE_XVFB=1 \
+GZ_RENDER_ENGINE=ogre \
 PX4_GZ_STANDALONE=1 \
 START_GZ_SERVER=1 \
 scripts/px4_gazebo_autonomy_smoke.sh
