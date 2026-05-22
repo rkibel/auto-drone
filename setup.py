@@ -14,6 +14,7 @@ setup(
             [
                 "launch/gazebo_lidar_bridge.launch.py",
                 "launch/gazebo_lidar_demo.launch.py",
+                "launch/gazebo_px4_full_stack.launch.py",
                 "launch/gazebo_px4_autonomy.launch.py",
             ],
         ),

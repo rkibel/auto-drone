@@ -1,3 +1,11 @@
+"""Depth-backed RGB-D mapping helpers.
+
+The autonomy node subscribes to both RGB and depth streams so an external
+visual-SLAM source can share the same camera timing boundary. Occupancy updates
+are intentionally depth-only in v1: RGB freshness can be required as a safety
+gate, while finite depth samples provide deterministic free/occupied carving.
+"""
+
 from __future__ import annotations
 
 from math import isfinite

@@ -76,6 +76,17 @@ It is installed as:
 ros2 launch auto_drone gazebo_px4_autonomy.launch.py
 ```
 
+For a composed simulator bringup that also starts Gazebo, PX4 SITL, Micro XRCE Agent, camera bridges, and the autonomy node:
+
+```bash
+ros2 launch auto_drone gazebo_px4_full_stack.launch.py \
+  px4_dir:=~/PX4-Autopilot-v1.15 \
+  px4_gz_standalone:=true \
+  start_gz_server:=true
+```
+
+The full-stack launch is intended for repeatable simulator hosts. Keep using `gazebo_px4_autonomy.launch.py` when PX4, Gazebo, and topic bridges are supervised externally.
+
 Recommended startup order on the Ubuntu simulator host:
 
 ```bash

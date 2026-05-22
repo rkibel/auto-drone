@@ -219,6 +219,19 @@ source install/setup.bash
 ros2 launch auto_drone gazebo_px4_autonomy.launch.py
 ```
 
+For a single ROS launch entry point on a simulator host, use the composed launch. It starts Micro XRCE Agent, optionally starts a standalone Gazebo server, starts PX4 SITL, bridges the x500 depth-camera topics, and includes the autonomy node:
+
+```bash
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 launch auto_drone gazebo_px4_full_stack.launch.py \
+  px4_dir:=~/PX4-Autopilot-v1.15 \
+  px4_gz_standalone:=true \
+  start_gz_server:=true
+```
+
+If PX4 or Gazebo are already supervised outside ROS launch, disable those processes with `start_px4:=false`, `start_gz_server:=false`, or `start_xrce_agent:=false`.
+
 For repeatable host validation, use the smoke runner from the repository root:
 
 ```bash
