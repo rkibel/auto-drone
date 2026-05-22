@@ -83,7 +83,14 @@ require_cmd bash
 
 if [[ -f "$ROS_SETUP" ]]; then
   # shellcheck source=/dev/null
+  HAD_NOUNSET=0
+  case "$-" in
+    *u*) HAD_NOUNSET=1; set +u ;;
+  esac
   source "$ROS_SETUP"
+  if [[ "$HAD_NOUNSET" -eq 1 ]]; then
+    set -u
+  fi
 fi
 
 require_cmd ros2
