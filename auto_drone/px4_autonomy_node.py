@@ -4,10 +4,10 @@ from dataclasses import dataclass
 from json import dumps
 from math import atan2
 
-from auto_drone.autonomy3d import DiscoveryPlan, choose_discovery_plan
+from auto_drone.autonomy3d import DiscoveryPlan, choose_discovery_plan, frontier_score
 from auto_drone.core3d import BeliefVolume
 from auto_drone.frames3d import enu_velocity_to_ned, px4_ned_pose_to_metric, yaw_enu_to_ned, yaw_rate_enu_to_ned
-from auto_drone.interfaces3d import CameraIntrinsics, MetricPose, PoseSample, VoxelGridSpec, command_toward_pose
+from auto_drone.interfaces3d import CameraIntrinsics, CommandTarget, MetricPose, PoseSample, VoxelGridSpec, command_toward_pose
 from auto_drone.mapping3d import integrate_range_frame
 from auto_drone.pose_sources import Px4OdomPoseSource, RosSlamPoseSource
 from auto_drone.rgbd_mapping import decode_depth_image, depth_image_to_range_frame
@@ -28,6 +28,7 @@ class AutonomyConfig:
     position_tolerance_m: float = 0.35
     min_altitude_m: float = 0.5
     max_altitude_m: float = 8.0
+    takeoff_altitude_m: float = 1.5
     require_rgb_frame: bool = False
 
 
@@ -41,6 +42,16 @@ class AutonomyTelemetry:
     frame_count: int
     target: MetricPose | None
     path_length: int
+
+
+@dataclass(frozen=True)
+class VisualizationSnapshot:
+    occupied: tuple[tuple[int, int, int], ...]
+    free: tuple[tuple[int, int, int], ...]
+    frontier: tuple[tuple[int, int, int], ...]
+    path: tuple[tuple[int, int, int], ...]
+    current: tuple[int, int, int] | None
+    target: tuple[int, int, int] | None
 
 
 class ClosedLoopAutonomy:
@@ -130,6 +141,27 @@ class ClosedLoopAutonomy:
             self.config.position_tolerance_m,
         )
 
+    def safety_command(self, now_sec: float) -> CommandTarget | None:
+        if self.pose_sample is None:
+            return None
+        if not self.pose_sample.is_fresh(now_sec, self.config.pose_timeout_sec):
+            return None
+        current_voxel = self.current_voxel()
+        if not self.config.grid.in_bounds(*current_voxel):
+            return None
+        if self.pose_sample.pose.z > self.config.max_altitude_m:
+            return None
+        target_z = max(self.pose_sample.pose.z, self.config.takeoff_altitude_m)
+        target_z = min(target_z, self.config.max_altitude_m)
+        target = MetricPose(self.pose_sample.pose.x, self.pose_sample.pose.y, target_z, yaw=self.pose_sample.pose.yaw)
+        return command_toward_pose(
+            self.pose_sample.pose,
+            target,
+            self.config.max_speed_mps,
+            self.config.max_yaw_rate_rps,
+            self.config.position_tolerance_m,
+        )
+
     def current_voxel(self) -> tuple[int, int, int]:
         if self.pose_sample is None:
             return (-1, -1, -1)
@@ -174,6 +206,50 @@ def telemetry_to_json(telemetry: AutonomyTelemetry) -> str:
     )
 
 
+def voxel_visualization_snapshot(
+    belief: BeliefVolume,
+    grid: VoxelGridSpec,
+    pose_sample: PoseSample | None,
+    plan: DiscoveryPlan,
+    max_voxels_per_layer: int = 2500,
+    free_stride: int = 3,
+) -> VisualizationSnapshot:
+    occupied: list[tuple[int, int, int]] = []
+    free: list[tuple[int, int, int]] = []
+    frontier: list[tuple[int, int, int]] = []
+    stride = max(1, free_stride)
+    for z in range(belief.depth):
+        for y in range(belief.height):
+            for x in range(belief.width):
+                probability = belief.occupancy_probability(x, y, z)
+                cell = (x, y, z)
+                if probability >= 0.65 and len(occupied) < max_voxels_per_layer:
+                    occupied.append(cell)
+                    continue
+                if belief.is_known_free(x, y, z):
+                    if frontier_score(belief, cell) > 0.0 and len(frontier) < max_voxels_per_layer:
+                        frontier.append(cell)
+                    elif (x + y + z) % stride == 0 and len(free) < max_voxels_per_layer:
+                        free.append(cell)
+
+    current = None
+    if pose_sample is not None:
+        pose = grid.metric_to_voxel(pose_sample.pose)
+        current = (pose.x, pose.y, pose.z)
+    target = None
+    if plan.target is not None:
+        target_pose = grid.metric_to_voxel(plan.target)
+        target = (target_pose.x, target_pose.y, target_pose.z)
+    return VisualizationSnapshot(
+        occupied=tuple(occupied),
+        free=tuple(free),
+        frontier=tuple(frontier),
+        path=tuple(plan.path),
+        current=current,
+        target=target,
+    )
+
+
 def yaw_from_quaternion(x: float, y: float, z: float, w: float) -> float:
     siny_cosp = 2.0 * (w * z + x * y)
     cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
@@ -182,12 +258,15 @@ def yaw_from_quaternion(x: float, y: float, z: float, w: float) -> float:
 
 def main() -> None:
     import rclpy
-    from geometry_msgs.msg import PoseStamped
+    from geometry_msgs.msg import Point, PoseStamped
     from px4_msgs.msg import OffboardControlMode, TrajectorySetpoint, VehicleCommand, VehicleOdometry, VehicleStatus
+    from rclpy._rclpy_pybind11 import RCLError
     from rclpy.executors import ExternalShutdownException
     from rclpy.node import Node
+    from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
     from sensor_msgs.msg import CameraInfo, Image
     from std_msgs.msg import String
+    from visualization_msgs.msg import Marker, MarkerArray
 
     class Px4AutonomyNode(Node):
         def __init__(self):
@@ -218,9 +297,14 @@ def main() -> None:
             self.declare_parameter("position_tolerance_m", 0.35)
             self.declare_parameter("min_altitude_m", 0.5)
             self.declare_parameter("max_altitude_m", 8.0)
+            self.declare_parameter("takeoff_altitude_m", 1.5)
             self.declare_parameter("require_rgb_frame", False)
             self.declare_parameter("arm_and_offboard", True)
             self.declare_parameter("telemetry_topic", "~/status")
+            self.declare_parameter("marker_topic", "~/markers")
+            self.declare_parameter("map_frame", "map")
+            self.declare_parameter("enable_visualization", True)
+            self.declare_parameter("visualization_period_sec", 1.0)
             self.declare_parameter("log_every", 10)
 
             grid = VoxelGridSpec(
@@ -246,30 +330,59 @@ def main() -> None:
                 position_tolerance_m=float(self.get_parameter("position_tolerance_m").value),
                 min_altitude_m=float(self.get_parameter("min_altitude_m").value),
                 max_altitude_m=float(self.get_parameter("max_altitude_m").value),
+                takeoff_altitude_m=float(self.get_parameter("takeoff_altitude_m").value),
                 require_rgb_frame=bool(self.get_parameter("require_rgb_frame").value),
             )
             self.autonomy = ClosedLoopAutonomy(config)
             self.log_every = int(self.get_parameter("log_every").value)
             self.use_slam_pose = bool(self.get_parameter("use_slam_pose").value)
             self.arm_and_offboard = bool(self.get_parameter("arm_and_offboard").value)
+            self.enable_visualization = bool(self.get_parameter("enable_visualization").value)
+            self.visualization_period_sec = float(self.get_parameter("visualization_period_sec").value)
+            self.map_frame = str(self.get_parameter("map_frame").value)
             self.setpoint_count = 0
+            self.last_visualization_sec = -1.0
+            self.last_hold_log_sec = -1.0
             self.vehicle_status = None
             self.px4_pose_source = Px4OdomPoseSource()
             self.slam_pose_source = RosSlamPoseSource()
+            px4_qos = QoSProfile(
+                history=HistoryPolicy.KEEP_LAST,
+                depth=10,
+                reliability=ReliabilityPolicy.BEST_EFFORT,
+                durability=DurabilityPolicy.VOLATILE,
+            )
+            sensor_qos = QoSProfile(
+                history=HistoryPolicy.KEEP_LAST,
+                depth=10,
+                reliability=ReliabilityPolicy.BEST_EFFORT,
+                durability=DurabilityPolicy.VOLATILE,
+            )
 
-            self.create_subscription(Image, str(self.get_parameter("rgb_topic").value), self.on_rgb, 10)
-            self.create_subscription(Image, str(self.get_parameter("depth_topic").value), self.on_depth, 10)
-            self.create_subscription(CameraInfo, str(self.get_parameter("camera_info_topic").value), self.on_camera_info, 10)
-            self.create_subscription(VehicleOdometry, str(self.get_parameter("px4_odom_topic").value), self.on_px4_odom, 10)
-            self.create_subscription(VehicleStatus, str(self.get_parameter("px4_status_topic").value), self.on_vehicle_status, 10)
+            self.create_subscription(Image, str(self.get_parameter("rgb_topic").value), self.on_rgb, sensor_qos)
+            self.create_subscription(Image, str(self.get_parameter("depth_topic").value), self.on_depth, sensor_qos)
+            self.create_subscription(CameraInfo, str(self.get_parameter("camera_info_topic").value), self.on_camera_info, sensor_qos)
+            self.create_subscription(
+                VehicleOdometry,
+                str(self.get_parameter("px4_odom_topic").value),
+                self.on_px4_odom,
+                px4_qos,
+            )
+            self.create_subscription(
+                VehicleStatus,
+                str(self.get_parameter("px4_status_topic").value),
+                self.on_vehicle_status,
+                px4_qos,
+            )
             slam_topic = str(self.get_parameter("slam_pose_topic").value)
             if slam_topic:
                 self.create_subscription(PoseStamped, slam_topic, self.on_slam_pose, 10)
 
-            self.offboard_pub = self.create_publisher(OffboardControlMode, "/fmu/in/offboard_control_mode", 10)
-            self.setpoint_pub = self.create_publisher(TrajectorySetpoint, "/fmu/in/trajectory_setpoint", 10)
-            self.vehicle_command_pub = self.create_publisher(VehicleCommand, "/fmu/in/vehicle_command", 10)
+            self.offboard_pub = self.create_publisher(OffboardControlMode, "/fmu/in/offboard_control_mode", px4_qos)
+            self.setpoint_pub = self.create_publisher(TrajectorySetpoint, "/fmu/in/trajectory_setpoint", px4_qos)
+            self.vehicle_command_pub = self.create_publisher(VehicleCommand, "/fmu/in/vehicle_command", px4_qos)
             self.telemetry_pub = self.create_publisher(String, str(self.get_parameter("telemetry_topic").value), 10)
+            self.marker_pub = self.create_publisher(MarkerArray, str(self.get_parameter("marker_topic").value), 10)
             self.create_timer(0.1, self.on_timer)
             self.get_logger().info("PX4 RGB-D autonomy node started")
 
@@ -317,16 +430,34 @@ def main() -> None:
             ready, reason = self.autonomy.ready(now)
             if not ready:
                 self.publish_telemetry(now)
-                if self.autonomy.frame_count % max(1, self.log_every) == 0:
-                    self.get_logger().info(f"holding: {reason}")
+                self.publish_visualization(now)
+                safety_command = self.autonomy.safety_command(now)
+                if safety_command is not None:
+                    self.publish_offboard_command(safety_command, now)
+                self.log_hold(reason, now)
                 return
             plan = self.autonomy.update_plan_if_due(now)
             command = self.autonomy.command()
             if plan.target is None or command is None:
                 self.publish_telemetry(now)
-                self.get_logger().info(f"holding: {plan.stop_reason}")
+                self.publish_visualization(now)
+                safety_command = self.autonomy.safety_command(now)
+                if safety_command is not None:
+                    self.publish_offboard_command(safety_command, now)
+                self.log_hold(plan.stop_reason, now)
                 return
 
+            self.publish_offboard_command(command, now)
+            self.publish_telemetry(now)
+            self.publish_visualization(now)
+            if self.autonomy.frame_count % max(1, self.log_every) == 0:
+                self.get_logger().info(
+                    f"frames={self.autonomy.frame_count} known={self.autonomy.belief.known_ratio():.3f} "
+                    f"uncertainty={self.autonomy.belief.mean_uncertainty():.3f} "
+                    f"target=({plan.target.x:.2f},{plan.target.y:.2f},{plan.target.z:.2f})"
+                )
+
+        def publish_offboard_command(self, command: CommandTarget, now: float) -> None:
             mode = OffboardControlMode()
             mode.timestamp = int(now * 1_000_000)
             mode.position = False
@@ -334,7 +465,8 @@ def main() -> None:
             mode.acceleration = False
             mode.attitude = False
             mode.body_rate = False
-            self.offboard_pub.publish(mode)
+            if not self.safe_publish(self.offboard_pub, mode):
+                return
 
             setpoint = TrajectorySetpoint()
             setpoint.timestamp = mode.timestamp
@@ -342,21 +474,14 @@ def main() -> None:
             setpoint.velocity = [float(vx_ned), float(vy_ned), float(vz_ned)]
             setpoint.yaw = float(yaw_enu_to_ned(command.pose.yaw))
             setpoint.yawspeed = float(yaw_rate_enu_to_ned(command.yaw_rate))
-            self.setpoint_pub.publish(setpoint)
-            self.publish_telemetry(now)
+            if not self.safe_publish(self.setpoint_pub, setpoint):
+                return
             self.setpoint_count += 1
             if self.arm_and_offboard and self.setpoint_count == 10:
                 self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_DO_SET_MODE, 1.0, 6.0)
                 self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_COMPONENT_ARM_DISARM, 1.0)
             if self.arm_and_offboard and self.setpoint_count == 50 and not self.vehicle_is_offboard_armed():
                 self.get_logger().warn("PX4 has not reported armed offboard mode; check PX4 preflight and mode status")
-
-            if self.autonomy.frame_count % max(1, self.log_every) == 0:
-                self.get_logger().info(
-                    f"frames={self.autonomy.frame_count} known={self.autonomy.belief.known_ratio():.3f} "
-                    f"uncertainty={self.autonomy.belief.mean_uncertainty():.3f} "
-                    f"target=({plan.target.x:.2f},{plan.target.y:.2f},{plan.target.z:.2f})"
-                )
 
         def publish_vehicle_command(self, command: int, param1: float = 0.0, param2: float = 0.0) -> None:
             msg = VehicleCommand()
@@ -369,7 +494,7 @@ def main() -> None:
             msg.source_system = 1
             msg.source_component = 1
             msg.from_external = True
-            self.vehicle_command_pub.publish(msg)
+            self.safe_publish(self.vehicle_command_pub, msg)
 
         def vehicle_is_offboard_armed(self) -> bool:
             if self.vehicle_status is None:
@@ -381,7 +506,100 @@ def main() -> None:
         def publish_telemetry(self, now: float) -> None:
             msg = String()
             msg.data = telemetry_to_json(self.autonomy.telemetry(now))
-            self.telemetry_pub.publish(msg)
+            self.safe_publish(self.telemetry_pub, msg)
+
+        def log_hold(self, reason: str, now: float) -> None:
+            if self.last_hold_log_sec < 0.0 or now - self.last_hold_log_sec >= 1.0:
+                self.get_logger().info(f"holding: {reason}")
+                self.last_hold_log_sec = now
+
+        def publish_visualization(self, now: float) -> None:
+            if not self.enable_visualization:
+                return
+            if self.visualization_period_sec > 0.0 and self.last_visualization_sec >= 0.0:
+                if now - self.last_visualization_sec < self.visualization_period_sec:
+                    return
+            snapshot = voxel_visualization_snapshot(
+                self.autonomy.belief,
+                self.autonomy.config.grid,
+                self.autonomy.pose_sample,
+                self.autonomy.plan,
+            )
+            self.last_visualization_sec = now
+            markers = MarkerArray()
+            stamp = self.get_clock().now().to_msg()
+            markers.markers.append(self.cube_marker(0, "known_free", snapshot.free, (0.12, 0.45, 1.0, 0.18), stamp))
+            markers.markers.append(self.cube_marker(1, "occupied", snapshot.occupied, (1.0, 0.18, 0.12, 0.65), stamp))
+            markers.markers.append(self.cube_marker(2, "frontier", snapshot.frontier, (1.0, 0.78, 0.1, 0.8), stamp))
+            markers.markers.append(self.line_marker(3, "path", snapshot.path, (0.2, 1.0, 0.35, 0.95), stamp))
+            markers.markers.append(self.sphere_marker(4, "target", snapshot.target, (0.95, 0.2, 1.0, 0.95), stamp))
+            markers.markers.append(self.sphere_marker(5, "drone_pose", snapshot.current, (0.1, 1.0, 1.0, 0.95), stamp))
+            self.safe_publish(self.marker_pub, markers)
+
+        def safe_publish(self, publisher, msg) -> bool:
+            try:
+                publisher.publish(msg)
+            except RCLError:
+                return False
+            return True
+
+        def metric_point_for_voxel(self, voxel: tuple[int, int, int]) -> Point:
+            pose = self.autonomy.config.grid.voxel_to_metric(*voxel)
+            point = Point()
+            point.x = float(pose.x)
+            point.y = float(pose.y)
+            point.z = float(pose.z)
+            return point
+
+        def cube_marker(self, marker_id, namespace, voxels, color, stamp):
+            marker = Marker()
+            marker.header.frame_id = self.map_frame
+            marker.header.stamp = stamp
+            marker.ns = namespace
+            marker.id = marker_id
+            marker.type = Marker.CUBE_LIST
+            marker.action = Marker.ADD
+            marker.pose.orientation.w = 1.0
+            marker.scale.x = self.autonomy.config.grid.resolution
+            marker.scale.y = self.autonomy.config.grid.resolution
+            marker.scale.z = self.autonomy.config.grid.resolution
+            marker.color.r, marker.color.g, marker.color.b, marker.color.a = color
+            marker.points = [self.metric_point_for_voxel(voxel) for voxel in voxels]
+            return marker
+
+        def line_marker(self, marker_id, namespace, voxels, color, stamp):
+            marker = Marker()
+            marker.header.frame_id = self.map_frame
+            marker.header.stamp = stamp
+            marker.ns = namespace
+            marker.id = marker_id
+            marker.type = Marker.LINE_STRIP
+            marker.action = Marker.ADD
+            marker.pose.orientation.w = 1.0
+            marker.scale.x = max(0.04, self.autonomy.config.grid.resolution * 0.25)
+            marker.color.r, marker.color.g, marker.color.b, marker.color.a = color
+            marker.points = [self.metric_point_for_voxel(voxel) for voxel in voxels]
+            return marker
+
+        def sphere_marker(self, marker_id, namespace, voxel, color, stamp):
+            marker = Marker()
+            marker.header.frame_id = self.map_frame
+            marker.header.stamp = stamp
+            marker.ns = namespace
+            marker.id = marker_id
+            marker.type = Marker.SPHERE
+            marker.action = Marker.ADD if voxel is not None else Marker.DELETE
+            marker.pose.orientation.w = 1.0
+            marker.scale.x = self.autonomy.config.grid.resolution * 1.8
+            marker.scale.y = self.autonomy.config.grid.resolution * 1.8
+            marker.scale.z = self.autonomy.config.grid.resolution * 1.8
+            marker.color.r, marker.color.g, marker.color.b, marker.color.a = color
+            if voxel is not None:
+                point = self.metric_point_for_voxel(voxel)
+                marker.pose.position.x = point.x
+                marker.pose.position.y = point.y
+                marker.pose.position.z = point.z
+            return marker
 
     rclpy.init()
     node = Px4AutonomyNode()

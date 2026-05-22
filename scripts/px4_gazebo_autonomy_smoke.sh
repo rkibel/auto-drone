@@ -11,11 +11,13 @@ GZ_PREFIX="${GZ_PREFIX:-}"
 GZ_IP="${GZ_IP:-127.0.0.1}"
 GZ_PARTITION="${GZ_PARTITION:-auto_drone_px4}"
 PX4_GZ_WORLD="${PX4_GZ_WORLD:-default}"
+GZ_WORLD_FILE="${GZ_WORLD_FILE:-}"
 PX4_GZ_STANDALONE="${PX4_GZ_STANDALONE:-0}"
 GZ_RENDER_ENGINE="${GZ_RENDER_ENGINE:-}"
 GZ_USE_XVFB="${GZ_USE_XVFB:-0}"
 XVFB_DISPLAY="${XVFB_DISPLAY:-:94}"
 START_GZ_SERVER="${START_GZ_SERVER:-0}"
+START_GZ_CLIENT="${START_GZ_CLIENT:-0}"
 DRY_RUN=0
 SKIP_PX4=0
 SKIP_AGENT=0
@@ -35,11 +37,13 @@ Environment:
   GZ_IP=$GZ_IP
   GZ_PARTITION=$GZ_PARTITION
   PX4_GZ_WORLD=$PX4_GZ_WORLD
+  GZ_WORLD_FILE=$GZ_WORLD_FILE
   PX4_GZ_STANDALONE=$PX4_GZ_STANDALONE
   GZ_RENDER_ENGINE=$GZ_RENDER_ENGINE
   GZ_USE_XVFB=$GZ_USE_XVFB
   XVFB_DISPLAY=$XVFB_DISPLAY
   START_GZ_SERVER=$START_GZ_SERVER
+  START_GZ_CLIENT=$START_GZ_CLIENT
 USAGE
 }
 
@@ -115,12 +119,18 @@ configure_gazebo_env() {
     export PATH="$GZ_PREFIX/bin:$HOME/.local/bin:$PATH"
     export CMAKE_PREFIX_PATH="$GZ_PREFIX:${CMAKE_PREFIX_PATH:-}"
     export PKG_CONFIG_PATH="$GZ_PREFIX/lib/x86_64-linux-gnu/pkgconfig:$GZ_PREFIX/share/pkgconfig:${PKG_CONFIG_PATH:-}"
-    export LD_LIBRARY_PATH="$GZ_PREFIX/lib/x86_64-linux-gnu:$GZ_PREFIX/lib/x86_64-linux-gnu/OGRE-2.3:$GZ_PREFIX/lib/x86_64-linux-gnu/OGRE-2.3/OGRE:$GZ_PREFIX/lib/x86_64-linux-gnu/gz-sim-8/plugins:$GZ_PREFIX/lib/x86_64-linux-gnu/gz-physics-7/engine-plugins:$GZ_PREFIX/lib/x86_64-linux-gnu/gz-rendering-8/engine-plugins:${LD_LIBRARY_PATH:-}"
+    export LD_LIBRARY_PATH="$GZ_PREFIX/lib/x86_64-linux-gnu:$GZ_PREFIX/lib/x86_64-linux-gnu/OGRE-2.3:$GZ_PREFIX/lib/x86_64-linux-gnu/OGRE-2.3/OGRE:$GZ_PREFIX/lib/x86_64-linux-gnu/gz-sim-8/plugins:$GZ_PREFIX/lib/x86_64-linux-gnu/gz-sim-8/plugins/gui:$GZ_PREFIX/lib/x86_64-linux-gnu/gz-gui-8/plugins:$GZ_PREFIX/lib/x86_64-linux-gnu/gz-physics-7/engine-plugins:$GZ_PREFIX/lib/x86_64-linux-gnu/gz-rendering-8/engine-plugins:${LD_LIBRARY_PATH:-}"
     export GZ_CONFIG_PATH="$GZ_PREFIX/share/gz:${GZ_CONFIG_PATH:-}"
     export RUBYLIB="$GZ_PREFIX/lib/ruby:$GZ_PREFIX/lib/x86_64-linux-gnu/ruby:${RUBYLIB:-}"
     export GZ_SIM_SYSTEM_PLUGIN_PATH="$GZ_PREFIX/lib/x86_64-linux-gnu/gz-sim-8/plugins:$GZ_PREFIX/lib/x86_64-linux-gnu:${GZ_SIM_SYSTEM_PLUGIN_PATH:-}"
+    export GZ_GUI_PLUGIN_PATH="$GZ_PREFIX/lib/x86_64-linux-gnu/gz-gui-8/plugins:$GZ_PREFIX/lib/x86_64-linux-gnu/gz-sim-8/plugins/gui:${GZ_GUI_PLUGIN_PATH:-}"
+    export GZ_SIM_GUI_PLUGIN_PATH="$GZ_PREFIX/lib/x86_64-linux-gnu/gz-sim-8/plugins/gui:${GZ_SIM_GUI_PLUGIN_PATH:-}"
     export GZ_SIM_PHYSICS_ENGINE_PATH="$GZ_PREFIX/lib/x86_64-linux-gnu/gz-physics-7/engine-plugins:$GZ_PREFIX/lib/x86_64-linux-gnu/gz-physics-6/engine-plugins:${GZ_SIM_PHYSICS_ENGINE_PATH:-}"
     export GZ_SIM_RENDER_ENGINE_PATH="$GZ_PREFIX/lib/x86_64-linux-gnu/gz-rendering-8/engine-plugins:$GZ_PREFIX/lib/x86_64-linux-gnu/gz-rendering-7/engine-plugins:${GZ_SIM_RENDER_ENGINE_PATH:-}"
+    export GZ_RENDERING_PLUGIN_PATH="$GZ_PREFIX/lib/x86_64-linux-gnu/gz-rendering-8/engine-plugins:$GZ_PREFIX/lib/x86_64-linux-gnu/gz-rendering-7/engine-plugins:${GZ_RENDERING_PLUGIN_PATH:-}"
+    export GZ_RENDERING_RESOURCE_PATH="$GZ_PREFIX/share/gz/gz-rendering8"
+    export OGRE_RESOURCE_PATH="$GZ_PREFIX/share/gz/gz-rendering8/ogre/media:$GZ_PREFIX/share/gz/gz-rendering7/ogre/media:${OGRE_RESOURCE_PATH:-}"
+    export OGRE_PLUGIN_DIR="$GZ_PREFIX/lib/x86_64-linux-gnu/OGRE-2.3/OGRE"
     export LIBGL_DRIVERS_PATH="$GZ_PREFIX/lib/x86_64-linux-gnu/dri:${LIBGL_DRIVERS_PATH:-}"
   fi
 
@@ -209,9 +219,30 @@ if [[ "$SKIP_PX4" -eq 0 ]]; then
     if [[ -n "$GZ_RENDER_ENGINE" ]]; then
       render_args=(--render-engine "$GZ_RENDER_ENGINE")
     fi
-    echo "+ gz sim ${render_args[*]} -r -s $PX4_DIR/Tools/simulation/gz/worlds/$PX4_GZ_WORLD.sdf"
+    world_file="$GZ_WORLD_FILE"
+    if [[ -z "$world_file" ]]; then
+      world_file="$PX4_DIR/Tools/simulation/gz/worlds/$PX4_GZ_WORLD.sdf"
+    fi
+    echo "+ gz sim ${render_args[*]} -r -s $world_file"
     if [[ "$DRY_RUN" -eq 0 ]]; then
-      gz sim "${render_args[@]}" -r -s "$PX4_DIR/Tools/simulation/gz/worlds/$PX4_GZ_WORLD.sdf" &
+      gz sim "${render_args[@]}" -r -s "$world_file" &
+      PIDS+=("$!")
+      sleep 8
+    fi
+  fi
+
+  if [[ "$START_GZ_CLIENT" -eq 1 ]]; then
+    render_args=()
+    if [[ -n "$GZ_RENDER_ENGINE" ]]; then
+      render_args=(--render-engine "$GZ_RENDER_ENGINE")
+    fi
+    gui_args=()
+    if [[ -n "$GZ_PREFIX" && -f "$GZ_PREFIX/share/gz/gz-sim8/gui/gui.config" ]]; then
+      gui_args=(--gui-config "$GZ_PREFIX/share/gz/gz-sim8/gui/gui.config")
+    fi
+    echo "+ gz sim ${render_args[*]} -g ${gui_args[*]}"
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+      gz sim "${render_args[@]}" -g "${gui_args[@]}" &
       PIDS+=("$!")
       sleep 8
     fi

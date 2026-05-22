@@ -203,7 +203,7 @@ colcon build --symlink-install --packages-select px4_msgs auto_drone
 source install/setup.bash
 ```
 
-If PX4's camera topics do not already match the repository defaults, add `ros_gz_bridge` remaps so the autonomy launch sees:
+The composed launch uses `config/gz_rgbd_bridge.yaml` to map Gazebo's default PX4 `gz_x500_depth` RGB-D topics (`/camera`, `/depth_camera`, `/camera_info`) onto the ROS topic names consumed by the autonomy node:
 
 ```text
 /camera/image
@@ -211,7 +211,7 @@ If PX4's camera topics do not already match the repository defaults, add `ros_gz
 /camera/depth/camera_info
 ```
 
-Then start the autonomy node:
+If the PX4 model or world changes, provide a replacement `bridge_config:=/path/to/gz_rgbd_bridge.yaml` with the correct Gazebo topic names. If PX4, Gazebo, XRCE, and camera bridges are already supervised outside this package, start only the autonomy node:
 
 ```bash
 source /opt/ros/humble/setup.bash
@@ -219,7 +219,7 @@ source install/setup.bash
 ros2 launch auto_drone gazebo_px4_autonomy.launch.py
 ```
 
-For a single ROS launch entry point on a simulator host, use the composed launch. It starts Micro XRCE Agent, optionally starts a standalone Gazebo server, starts PX4 SITL, bridges the x500 depth-camera topics, and includes the autonomy node:
+For a single ROS launch entry point on a simulator host, use the composed launch. It starts Micro XRCE Agent, optionally starts a standalone Gazebo server, starts PX4 SITL, bridges the x500 depth-camera topics, includes the autonomy node, and can open RViz on the marker view:
 
 ```bash
 source /opt/ros/humble/setup.bash
@@ -227,10 +227,13 @@ source install/setup.bash
 ros2 launch auto_drone gazebo_px4_full_stack.launch.py \
   px4_dir:=~/PX4-Autopilot-v1.15 \
   px4_gz_standalone:=true \
-  start_gz_server:=true
+  start_gz_server:=true \
+  start_rviz:=true
 ```
 
 If PX4 or Gazebo are already supervised outside ROS launch, disable those processes with `start_px4:=false`, `start_gz_server:=false`, or `start_xrce_agent:=false`.
+For headless/rootless Gazebo validation, pass `gz_render_engine:=ogre` in addition to the environment variables shown below.
+If the host exposes Gazebo camera topics but render sensors do not emit frames, disable the Gazebo camera bridge and enable the synthetic RGB-D fallback with `start_camera_bridge:=false start_synthetic_rgbd:=true depth_timeout_sec:=2.0`. That keeps PX4 odometry, offboard control, Gazebo motion, voxel mapping, planning, telemetry, and RViz markers in the same closed loop while making the render-sensor limitation explicit.
 
 For repeatable host validation, use the smoke runner from the repository root:
 
@@ -279,6 +282,8 @@ Required topics:
 /fmu/in/offboard_control_mode
 /fmu/in/trajectory_setpoint
 /fmu/in/vehicle_command
+/auto_drone_px4_autonomy/status
+/auto_drone_px4_autonomy/markers
 ```
 
 Smoke checks before enabling motion:
@@ -288,9 +293,19 @@ ros2 topic echo /fmu/out/vehicle_odometry --once
 ros2 topic echo /fmu/out/vehicle_status --once
 ros2 topic echo /camera/depth/camera_info --once
 ros2 topic hz /camera/depth/image
+ros2 topic echo /auto_drone_px4_autonomy/status --once
+ros2 topic hz /auto_drone_px4_autonomy/markers
 ```
 
-The autonomy log should show depth frames being integrated, a current pose, planned targets, and offboard/arming warnings when PX4 rejects mode changes. If `/fmu/out/*` topics are missing, check the XRCE agent and `px4_msgs` version before changing `auto_drone`.
+The autonomy log should show depth frames being integrated, a current pose, planned targets, and offboard/arming warnings when PX4 rejects mode changes. The node publishes bootstrap takeoff/hold setpoints while depth or camera info is still becoming ready, then switches to discovery waypoint velocity commands after pose, RGB-D, and bounds checks pass. If `/fmu/out/*` topics are missing, check the XRCE agent and `px4_msgs` version before changing `auto_drone`.
+
+To watch the map build while the Gazebo client shows the vehicle, launch RViz with the installed config:
+
+```bash
+rviz2 -d $(ros2 pkg prefix auto_drone)/share/auto_drone/config/px4_autonomy.rviz
+```
+
+The RViz display subscribes to `/auto_drone_px4_autonomy/markers`: blue cubes are known-free voxels, red cubes are occupied voxels, yellow cubes are frontier/discovery cells, the green line is the current planned path, the magenta sphere is the target, and the cyan sphere is the current PX4/SLAM pose mapped into the voxel grid. Marker snapshots publish at `visualization_period_sec` so visualization remains visible without competing with the 10 Hz offboard command loop.
 
 By default the node uses PX4 odometry as the pose source. To use visual SLAM, publish `geometry_msgs/msg/PoseStamped` and set `slam_pose_topic` plus `use_slam_pose:=true` in `config/px4_autonomy.yaml` or as launch overrides. If PX4 does not report armed offboard mode after setpoints begin, the node logs a preflight/mode warning instead of silently failing.
 
@@ -303,20 +318,7 @@ Frame conventions:
 
 ### Custom Reconstruction World
 
-`worlds/px4_reconstruction_world.sdf` is a repository-owned reconstruction arena, not a complete PX4 vehicle model. Treat it as the environment to merge into a PX4-supported Gazebo world or to load in PX4 standalone Gazebo mode once the host's PX4/Gazebo version is pinned.
-
-The intended validation sequence is:
-
-```bash
-# Terminal 1: PX4 waits for an external Gazebo server
-cd ~/PX4-Autopilot
-PX4_GZ_STANDALONE=1 make px4_sitl gz_x500_depth
-
-# Terminal 2: start a Gazebo server with a PX4-compatible world/model setup
-gz sim -r /path/to/px4_reconstruction_world_with_x500_depth.sdf
-```
-
-This custom-world flow is intentionally not baked into `gazebo_px4_autonomy.launch.py` yet. Keep PX4 spawning and Gazebo bridge wiring outside the `auto_drone` launch until the Ubuntu simulator host proves a repeatable model path, camera topic names, and world-file layout.
+`worlds/px4_reconstruction_world.sdf` is a repository-owned reconstruction arena with bounded obstacles and RGB-D camera metadata. The default full-stack launch uses PX4's supported `default` world and `gz_x500_depth` model because that is the most repeatable PX4 SITL smoke path. To test the repository arena, pass a compatible PX4 world name through `px4_gz_world:=...` or merge the arena geometry into the PX4 checkout's Gazebo world directory, then keep the same autonomy and RViz launch path.
 
 ### External Assumptions
 

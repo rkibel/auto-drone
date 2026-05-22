@@ -23,6 +23,12 @@ def generate_launch_description():
             DeclareLaunchArgument("slam_pose_topic", default_value=""),
             DeclareLaunchArgument("use_slam_pose", default_value="false"),
             DeclareLaunchArgument("telemetry_topic", default_value="~/status"),
+            DeclareLaunchArgument("marker_topic", default_value="~/markers"),
+            DeclareLaunchArgument("map_frame", default_value="map"),
+            DeclareLaunchArgument("enable_visualization", default_value="true"),
+            DeclareLaunchArgument("visualization_period_sec", default_value="1.0"),
+            DeclareLaunchArgument("depth_timeout_sec", default_value="0.5"),
+            DeclareLaunchArgument("takeoff_altitude_m", default_value="1.5"),
             DeclareLaunchArgument("require_rgb_frame", default_value="false"),
             Node(
                 package="auto_drone",
@@ -40,6 +46,20 @@ def generate_launch_description():
                         "slam_pose_topic": LaunchConfiguration("slam_pose_topic"),
                         "use_slam_pose": ParameterValue(LaunchConfiguration("use_slam_pose"), value_type=bool),
                         "telemetry_topic": LaunchConfiguration("telemetry_topic"),
+                        "marker_topic": LaunchConfiguration("marker_topic"),
+                        "map_frame": LaunchConfiguration("map_frame"),
+                        "enable_visualization": ParameterValue(
+                            LaunchConfiguration("enable_visualization"), value_type=bool
+                        ),
+                        "visualization_period_sec": ParameterValue(
+                            LaunchConfiguration("visualization_period_sec"), value_type=float
+                        ),
+                        "depth_timeout_sec": ParameterValue(
+                            LaunchConfiguration("depth_timeout_sec"), value_type=float
+                        ),
+                        "takeoff_altitude_m": ParameterValue(
+                            LaunchConfiguration("takeoff_altitude_m"), value_type=float
+                        ),
                         "require_rgb_frame": ParameterValue(
                             LaunchConfiguration("require_rgb_frame"), value_type=bool
                         ),

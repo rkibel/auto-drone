@@ -82,10 +82,24 @@ For a composed simulator bringup that also starts Gazebo, PX4 SITL, Micro XRCE A
 ros2 launch auto_drone gazebo_px4_full_stack.launch.py \
   px4_dir:=~/PX4-Autopilot-v1.15 \
   px4_gz_standalone:=true \
-  start_gz_server:=true
+  start_gz_server:=true \
+  start_rviz:=true
 ```
 
-The full-stack launch is intended for repeatable simulator hosts. Keep using `gazebo_px4_autonomy.launch.py` when PX4, Gazebo, and topic bridges are supervised externally.
+The full-stack launch is intended for repeatable simulator hosts. It can start Micro XRCE-DDS Agent, Gazebo, PX4 SITL, the RGB-D bridge, the autonomy node, and RViz. Keep using `gazebo_px4_autonomy.launch.py` when PX4, Gazebo, and topic bridges are supervised externally.
+
+If a rootless/headless Gazebo install exposes camera topics but does not emit render-sensor frames, keep PX4/Gazebo in the loop and enable the synthetic RGB-D fallback:
+
+```bash
+ros2 launch auto_drone gazebo_px4_full_stack.launch.py \
+  px4_dir:=~/PX4-Autopilot-v1.15 \
+  start_camera_bridge:=false \
+  start_synthetic_rgbd:=true \
+  depth_timeout_sec:=2.0 \
+  start_rviz:=true
+```
+
+This is a validation fallback for constrained simulator hosts; real Gazebo RGB-D remains the default.
 
 Recommended startup order on the Ubuntu simulator host:
 
@@ -138,9 +152,11 @@ The launch expects PX4 SITL and the Gazebo/ROS bridge to provide:
 - `/fmu/in/trajectory_setpoint`
 - `/fmu/in/vehicle_command`
 
-Configuration lives in `config/px4_autonomy.yaml`. The package also installs `worlds/px4_reconstruction_world.sdf`, a PX4-oriented reconstruction arena with bounded obstacles and an RGB-D reference sensor. PX4 model spawning and bridge startup remain external so the mapper/planner is not tied to a specific PX4 checkout layout.
+The autonomy node publishes `/auto_drone_px4_autonomy/status` as JSON telemetry and `/auto_drone_px4_autonomy/markers` as RViz `MarkerArray` visualization. In RViz, `known_free` cells are blue, occupied cells are red, frontier/discovery cells are yellow, the planned path is green, the target is magenta, and the current drone pose is cyan. Marker snapshots default to 1 Hz so the 10 Hz offboard control loop is not blocked by full-volume visualization scans.
 
-The autonomy core uses ENU metric coordinates internally. PX4 odometry and setpoints are converted at the ROS node boundary: PX4 NED position and yaw become internal ENU `MetricPose`, and internal velocity/yaw commands are converted back to PX4 NED `TrajectorySetpoint` fields. RGB-D depth pixels are interpreted in camera optical convention, then converted to local forward-left-up voxel rays before mapping.
+Configuration lives in `config/px4_autonomy.yaml`. The package also installs `config/gz_rgbd_bridge.yaml` for the default PX4 `gz_x500_depth` `/camera`, `/depth_camera`, and `/camera_info` bridge, plus `worlds/px4_reconstruction_world.sdf`, a PX4-oriented reconstruction arena with bounded obstacles and an RGB-D reference sensor. PX4 model spawning, RGB-D topic names, and bridge startup are launch-configurable so the mapper/planner is not tied to a specific PX4 checkout layout.
+
+The autonomy core uses ENU metric coordinates internally. PX4 odometry and setpoints are converted at the ROS node boundary: PX4 NED position and yaw become internal ENU `MetricPose`, and internal velocity/yaw commands are converted back to PX4 NED `TrajectorySetpoint` fields. RGB-D depth pixels are interpreted in camera optical convention, then converted to local forward-left-up voxel rays before mapping. Before the depth mapper is ready, the node publishes bounded takeoff/hold setpoints so PX4 can enter offboard mode and climb to the configured exploration altitude instead of waiting on the ground.
 
 See [docs/gazebo_setup.md](docs/gazebo_setup.md) for the fuller PX4/Gazebo runbook, topic checks, and host assumptions.
 

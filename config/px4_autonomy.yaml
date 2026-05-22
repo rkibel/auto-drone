@@ -26,7 +26,12 @@ auto_drone_px4_autonomy:
     position_tolerance_m: 0.35
     min_altitude_m: 0.5
     max_altitude_m: 8.0
+    takeoff_altitude_m: 1.5
     require_rgb_frame: false
     arm_and_offboard: true
     telemetry_topic: ~/status
+    marker_topic: ~/markers
+    map_frame: map
+    enable_visualization: true
+    visualization_period_sec: 1.0
     log_every: 10

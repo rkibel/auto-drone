@@ -21,7 +21,9 @@ setup(
         (
             f"share/{package_name}/config",
             [
+                "config/gz_rgbd_bridge.yaml",
                 "config/px4_autonomy.yaml",
+                "config/px4_autonomy.rviz",
             ],
         ),
         (
@@ -50,6 +52,7 @@ setup(
             "headless_3d_runner = auto_drone.headless_3d_runner:main",
             "gazebo_lidar_bridge = auto_drone.gazebo_lidar_bridge:main",
             "px4_autonomy_node = auto_drone.px4_autonomy_node:main",
+            "synthetic_rgbd_node = auto_drone.synthetic_rgbd_node:main",
         ],
     },
 )

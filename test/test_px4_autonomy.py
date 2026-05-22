@@ -10,6 +10,7 @@ from auto_drone.px4_autonomy_node import (
     AutonomyConfig,
     ClosedLoopAutonomy,
     telemetry_to_json,
+    voxel_visualization_snapshot,
     yaw_from_quaternion,
 )
 from auto_drone.pose_sources import Px4OdomPoseSource, RosSlamPoseSource
@@ -189,6 +190,49 @@ def test_closed_loop_autonomy_reports_bounds_altitude_and_rgb_holds():
     assert autonomy.ready(now_sec=1.1) == (False, "stale_rgb")
     autonomy.update_rgb_stamp(stamp_sec=1.08)
     assert autonomy.ready(now_sec=1.1) == (True, None)
+
+
+def test_closed_loop_safety_command_bootstraps_takeoff_before_mapping_ready():
+    grid = VoxelGridSpec(8, 8, 6, 0.5, -2.0, -2.0, 0.0)
+    autonomy = ClosedLoopAutonomy(
+        AutonomyConfig(
+            grid=grid,
+            pose_timeout_sec=1.0,
+            min_altitude_m=0.5,
+            takeoff_altitude_m=1.5,
+            max_speed_mps=1.0,
+        )
+    )
+    autonomy.update_pose(PoseSample(MetricPose(0.0, 0.0, 0.1), stamp_sec=1.0))
+
+    command = autonomy.safety_command(now_sec=1.1)
+
+    assert command is not None
+    assert command.pose == MetricPose(0.0, 0.0, 1.5, yaw=0.0)
+    assert command.velocity[2] > 0.0
+
+
+def test_visualization_snapshot_reports_map_path_target_and_pose_layers():
+    grid = VoxelGridSpec(8, 8, 4, 0.5, -2.0, -2.0, 0.0)
+    belief = BeliefVolume(grid.width, grid.height, grid.depth)
+    for _ in range(4):
+        belief.observe(4, 4, 2, occupied=False)
+        belief.observe(5, 4, 2, occupied=True)
+    plan = DiscoveryPlan(MetricPose(1.0, 0.0, 1.0), ((4, 4, 2), (5, 4, 2)), None)
+
+    snapshot = voxel_visualization_snapshot(
+        belief,
+        grid,
+        PoseSample(MetricPose(0.0, 0.0, 1.0), stamp_sec=1.0),
+        plan,
+        free_stride=1,
+    )
+
+    assert (5, 4, 2) in snapshot.occupied
+    assert (4, 4, 2) in snapshot.frontier or (4, 4, 2) in snapshot.free
+    assert snapshot.path == ((4, 4, 2), (5, 4, 2))
+    assert snapshot.current == (4, 4, 2)
+    assert snapshot.target == (6, 4, 2)
 
 
 def test_closed_loop_depth_integration_holds_until_pose_and_camera_info_available():
