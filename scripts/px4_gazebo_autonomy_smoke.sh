@@ -80,6 +80,12 @@ run_or_print() {
 require_file "$ROS_SETUP"
 require_file "$WORKSPACE_SETUP"
 require_cmd bash
+
+if [[ -f "$ROS_SETUP" ]]; then
+  # shellcheck source=/dev/null
+  source "$ROS_SETUP"
+fi
+
 require_cmd ros2
 
 configure_gazebo_env() {
