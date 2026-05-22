@@ -1,12 +1,17 @@
 from math import inf, isclose, pi
 from struct import pack
 
-from auto_drone.autonomy3d import choose_discovery_plan, inflated_occupied_voxels, reachable_safe_voxels
+from auto_drone.autonomy3d import DiscoveryPlan, choose_discovery_plan, inflated_occupied_voxels, reachable_safe_voxels
 from auto_drone.core3d import BeliefVolume
 from auto_drone.frames3d import enu_velocity_to_ned, px4_ned_pose_to_metric, yaw_enu_to_ned, yaw_ned_to_enu, yaw_rate_enu_to_ned
 from auto_drone.interfaces3d import CameraIntrinsics, MetricPose, PoseSample, VoxelGridSpec, command_toward_pose
 from auto_drone.mapping3d import integrate_range_frame
-from auto_drone.px4_autonomy_node import AutonomyConfig, ClosedLoopAutonomy
+from auto_drone.px4_autonomy_node import (
+    AutonomyConfig,
+    ClosedLoopAutonomy,
+    telemetry_to_json,
+    yaw_from_quaternion,
+)
 from auto_drone.pose_sources import Px4OdomPoseSource, RosSlamPoseSource
 from auto_drone.rgbd_mapping import decode_depth_image, depth_image_to_range_frame, depth_pixel_to_local_voxel
 
@@ -136,3 +141,101 @@ def test_closed_loop_autonomy_integrates_depth_plans_and_commands():
     assert ready, reason
     assert plan.target is not None
     assert command is not None
+
+
+def test_closed_loop_autonomy_reports_safety_hold_reasons():
+    grid = VoxelGridSpec(8, 8, 4, 0.5, -2.0, -2.0, 0.0)
+    autonomy = ClosedLoopAutonomy(
+        AutonomyConfig(grid=grid, pose_timeout_sec=0.5, depth_timeout_sec=0.5, min_altitude_m=0.5)
+    )
+
+    assert autonomy.ready(now_sec=1.0) == (False, "missing_pose")
+
+    autonomy.update_pose(PoseSample(MetricPose(0.0, 0.0, 1.0), stamp_sec=1.0))
+    assert autonomy.ready(now_sec=1.1) == (False, "missing_camera_info")
+
+    autonomy.update_camera_info(CameraIntrinsics(width=1, height=1, fx=1.0, fy=1.0, cx=0.0, cy=0.0))
+    assert autonomy.ready(now_sec=1.6) == (False, "stale_pose")
+
+    autonomy.update_pose(PoseSample(MetricPose(0.0, 0.0, 1.0), stamp_sec=2.0))
+    assert autonomy.ready(now_sec=2.1) == (False, "stale_depth")
+
+
+def test_closed_loop_autonomy_reports_bounds_altitude_and_rgb_holds():
+    grid = VoxelGridSpec(8, 8, 4, 0.5, -2.0, -2.0, 0.0)
+    autonomy = ClosedLoopAutonomy(
+        AutonomyConfig(
+            grid=grid,
+            pose_timeout_sec=1.0,
+            depth_timeout_sec=1.0,
+            min_altitude_m=0.5,
+            max_altitude_m=1.5,
+            require_rgb_frame=True,
+        )
+    )
+    autonomy.update_camera_info(CameraIntrinsics(width=1, height=1, fx=1.0, fy=1.0, cx=0.0, cy=0.0))
+
+    autonomy.update_pose(PoseSample(MetricPose(30.0, 0.0, 1.0), stamp_sec=1.0))
+    assert autonomy.ready(now_sec=1.1) == (False, "pose_out_of_bounds")
+
+    autonomy.update_pose(PoseSample(MetricPose(0.0, 0.0, 0.1), stamp_sec=1.0))
+    assert autonomy.ready(now_sec=1.1) == (False, "below_min_altitude")
+
+    autonomy.update_pose(PoseSample(MetricPose(0.0, 0.0, 1.6), stamp_sec=1.0))
+    assert autonomy.ready(now_sec=1.1) == (False, "above_max_altitude")
+
+    autonomy.update_pose(PoseSample(MetricPose(0.0, 0.0, 1.0), stamp_sec=1.0))
+    autonomy.integrate_depth([1.0], stamp_sec=1.05)
+    assert autonomy.ready(now_sec=1.1) == (False, "stale_rgb")
+    autonomy.update_rgb_stamp(stamp_sec=1.08)
+    assert autonomy.ready(now_sec=1.1) == (True, None)
+
+
+def test_closed_loop_depth_integration_holds_until_pose_and_camera_info_available():
+    grid = VoxelGridSpec(8, 8, 4, 0.5, -2.0, -2.0, 0.0)
+    autonomy = ClosedLoopAutonomy(AutonomyConfig(grid=grid, depth_stride=1))
+
+    assert autonomy.integrate_depth([1.0], stamp_sec=1.0) == 0
+    assert autonomy.last_depth_stamp_sec == -1.0
+    assert autonomy.frame_count == 0
+
+    autonomy.update_pose(PoseSample(MetricPose(0.0, 0.0, 1.0), stamp_sec=1.0))
+    assert autonomy.integrate_depth([1.0], stamp_sec=1.1) == 0
+    assert autonomy.last_depth_stamp_sec == -1.0
+    assert autonomy.frame_count == 0
+
+    autonomy.update_camera_info(CameraIntrinsics(width=1, height=1, fx=1.0, fy=1.0, cx=0.0, cy=0.0))
+    assert autonomy.integrate_depth([1.0], stamp_sec=1.2) > 0
+    assert autonomy.last_depth_stamp_sec == 1.2
+    assert autonomy.frame_count == 1
+
+
+def test_closed_loop_command_tracks_next_path_voxel_before_final_target():
+    grid = VoxelGridSpec(10, 10, 6, 1.0, 0.0, 0.0, 0.0)
+    autonomy = ClosedLoopAutonomy(
+        AutonomyConfig(grid=grid, max_speed_mps=1.0, max_yaw_rate_rps=1.0, position_tolerance_m=0.1)
+    )
+    autonomy.update_pose(PoseSample(MetricPose(1.0, 1.0, 1.0, yaw=0.0), stamp_sec=1.0))
+    autonomy.plan = DiscoveryPlan(MetricPose(5.0, 1.0, 1.0, yaw=0.5), ((2, 1, 1), (5, 1, 1)), None)
+
+    command = autonomy.command()
+
+    assert command is not None
+    assert command.pose == MetricPose(2.0, 1.0, 1.0, yaw=0.5)
+    assert command.velocity == (1.0, 0.0, 0.0)
+    assert command.yaw_rate == 0.5
+
+
+def test_yaw_from_px4_quaternion_matches_expected_heading():
+    assert isclose(yaw_from_quaternion(0.0, 0.0, 0.0, 1.0), 0.0)
+    assert isclose(yaw_from_quaternion(0.0, 0.0, 2**0.5 / 2.0, 2**0.5 / 2.0), pi / 2.0)
+
+
+def test_closed_loop_telemetry_serializes_status_for_ros_publication():
+    grid = VoxelGridSpec(8, 8, 4, 0.5, -2.0, -2.0, 0.0)
+    autonomy = ClosedLoopAutonomy(AutonomyConfig(grid=grid, min_altitude_m=0.5))
+    telemetry = autonomy.telemetry(now_sec=1.0)
+    payload = telemetry_to_json(telemetry)
+    assert '"ready": false' in payload
+    assert '"hold_reason": "missing_pose"' in payload
+    assert '"known_ratio": 0.0' in payload

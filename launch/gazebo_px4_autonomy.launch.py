@@ -22,6 +22,8 @@ def generate_launch_description():
             DeclareLaunchArgument("px4_status_topic", default_value="/fmu/out/vehicle_status"),
             DeclareLaunchArgument("slam_pose_topic", default_value=""),
             DeclareLaunchArgument("use_slam_pose", default_value="false"),
+            DeclareLaunchArgument("telemetry_topic", default_value="~/status"),
+            DeclareLaunchArgument("require_rgb_frame", default_value="false"),
             Node(
                 package="auto_drone",
                 executable="px4_autonomy_node",
@@ -37,6 +39,10 @@ def generate_launch_description():
                         "px4_status_topic": LaunchConfiguration("px4_status_topic"),
                         "slam_pose_topic": LaunchConfiguration("slam_pose_topic"),
                         "use_slam_pose": ParameterValue(LaunchConfiguration("use_slam_pose"), value_type=bool),
+                        "telemetry_topic": LaunchConfiguration("telemetry_topic"),
+                        "require_rgb_frame": ParameterValue(
+                            LaunchConfiguration("require_rgb_frame"), value_type=bool
+                        ),
                     },
                 ],
             ),

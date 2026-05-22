@@ -30,6 +30,12 @@ setup(
                 "worlds/px4_reconstruction_world.sdf",
             ],
         ),
+        (
+            f"share/{package_name}/scripts",
+            [
+                "scripts/px4_gazebo_autonomy_smoke.sh",
+            ],
+        ),
     ],
     install_requires=["setuptools"],
     zip_safe=True,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from json import dumps
 from math import atan2
 
 from auto_drone.autonomy3d import DiscoveryPlan, choose_discovery_plan
@@ -25,6 +26,21 @@ class AutonomyConfig:
     max_speed_mps: float = 1.2
     max_yaw_rate_rps: float = 0.8
     position_tolerance_m: float = 0.35
+    min_altitude_m: float = 0.5
+    max_altitude_m: float = 8.0
+    require_rgb_frame: bool = False
+
+
+@dataclass(frozen=True)
+class AutonomyTelemetry:
+    ready: bool
+    hold_reason: str | None
+    pose_source: str | None
+    known_ratio: float
+    mean_uncertainty: float
+    frame_count: int
+    target: MetricPose | None
+    path_length: int
 
 
 class ClosedLoopAutonomy:
@@ -72,6 +88,14 @@ class ClosedLoopAutonomy:
             return False, "missing_camera_info"
         if not self.pose_sample.is_fresh(now_sec, self.config.pose_timeout_sec):
             return False, "stale_pose"
+        if not self.config.grid.in_bounds(*self.current_voxel()):
+            return False, "pose_out_of_bounds"
+        if self.pose_sample.pose.z < self.config.min_altitude_m:
+            return False, "below_min_altitude"
+        if self.pose_sample.pose.z > self.config.max_altitude_m:
+            return False, "above_max_altitude"
+        if self.config.require_rgb_frame and now_sec - self.last_rgb_stamp_sec > self.config.depth_timeout_sec:
+            return False, "stale_rgb"
         if now_sec - self.last_depth_stamp_sec > self.config.depth_timeout_sec:
             return False, "stale_depth"
         return True, None
@@ -106,6 +130,49 @@ class ClosedLoopAutonomy:
             self.config.position_tolerance_m,
         )
 
+    def current_voxel(self) -> tuple[int, int, int]:
+        if self.pose_sample is None:
+            return (-1, -1, -1)
+        pose = self.config.grid.metric_to_voxel(self.pose_sample.pose)
+        return pose.x, pose.y, pose.z
+
+    def telemetry(self, now_sec: float) -> AutonomyTelemetry:
+        ready, reason = self.ready(now_sec)
+        return AutonomyTelemetry(
+            ready=ready,
+            hold_reason=reason if not ready else self.plan.stop_reason,
+            pose_source=self.pose_sample.source if self.pose_sample else None,
+            known_ratio=self.belief.known_ratio(),
+            mean_uncertainty=self.belief.mean_uncertainty(),
+            frame_count=self.frame_count,
+            target=self.plan.target,
+            path_length=len(self.plan.path),
+        )
+
+
+def telemetry_to_json(telemetry: AutonomyTelemetry) -> str:
+    target = None
+    if telemetry.target is not None:
+        target = {
+            "x": telemetry.target.x,
+            "y": telemetry.target.y,
+            "z": telemetry.target.z,
+            "yaw": telemetry.target.yaw,
+        }
+    return dumps(
+        {
+            "ready": telemetry.ready,
+            "hold_reason": telemetry.hold_reason,
+            "pose_source": telemetry.pose_source,
+            "known_ratio": round(telemetry.known_ratio, 6),
+            "mean_uncertainty": round(telemetry.mean_uncertainty, 6),
+            "frame_count": telemetry.frame_count,
+            "target": target,
+            "path_length": telemetry.path_length,
+        },
+        sort_keys=True,
+    )
+
 
 def yaw_from_quaternion(x: float, y: float, z: float, w: float) -> float:
     siny_cosp = 2.0 * (w * z + x * y)
@@ -120,6 +187,7 @@ def main() -> None:
     from rclpy.executors import ExternalShutdownException
     from rclpy.node import Node
     from sensor_msgs.msg import CameraInfo, Image
+    from std_msgs.msg import String
 
     class Px4AutonomyNode(Node):
         def __init__(self):
@@ -148,7 +216,11 @@ def main() -> None:
             self.declare_parameter("max_speed_mps", 1.2)
             self.declare_parameter("max_yaw_rate_rps", 0.8)
             self.declare_parameter("position_tolerance_m", 0.35)
+            self.declare_parameter("min_altitude_m", 0.5)
+            self.declare_parameter("max_altitude_m", 8.0)
+            self.declare_parameter("require_rgb_frame", False)
             self.declare_parameter("arm_and_offboard", True)
+            self.declare_parameter("telemetry_topic", "~/status")
             self.declare_parameter("log_every", 10)
 
             grid = VoxelGridSpec(
@@ -172,6 +244,9 @@ def main() -> None:
                 max_speed_mps=float(self.get_parameter("max_speed_mps").value),
                 max_yaw_rate_rps=float(self.get_parameter("max_yaw_rate_rps").value),
                 position_tolerance_m=float(self.get_parameter("position_tolerance_m").value),
+                min_altitude_m=float(self.get_parameter("min_altitude_m").value),
+                max_altitude_m=float(self.get_parameter("max_altitude_m").value),
+                require_rgb_frame=bool(self.get_parameter("require_rgb_frame").value),
             )
             self.autonomy = ClosedLoopAutonomy(config)
             self.log_every = int(self.get_parameter("log_every").value)
@@ -194,6 +269,7 @@ def main() -> None:
             self.offboard_pub = self.create_publisher(OffboardControlMode, "/fmu/in/offboard_control_mode", 10)
             self.setpoint_pub = self.create_publisher(TrajectorySetpoint, "/fmu/in/trajectory_setpoint", 10)
             self.vehicle_command_pub = self.create_publisher(VehicleCommand, "/fmu/in/vehicle_command", 10)
+            self.telemetry_pub = self.create_publisher(String, str(self.get_parameter("telemetry_topic").value), 10)
             self.create_timer(0.1, self.on_timer)
             self.get_logger().info("PX4 RGB-D autonomy node started")
 
@@ -240,12 +316,14 @@ def main() -> None:
             now = self.now_sec()
             ready, reason = self.autonomy.ready(now)
             if not ready:
+                self.publish_telemetry(now)
                 if self.autonomy.frame_count % max(1, self.log_every) == 0:
                     self.get_logger().info(f"holding: {reason}")
                 return
             plan = self.autonomy.update_plan_if_due(now)
             command = self.autonomy.command()
             if plan.target is None or command is None:
+                self.publish_telemetry(now)
                 self.get_logger().info(f"holding: {plan.stop_reason}")
                 return
 
@@ -265,6 +343,7 @@ def main() -> None:
             setpoint.yaw = float(yaw_enu_to_ned(command.pose.yaw))
             setpoint.yawspeed = float(yaw_rate_enu_to_ned(command.yaw_rate))
             self.setpoint_pub.publish(setpoint)
+            self.publish_telemetry(now)
             self.setpoint_count += 1
             if self.arm_and_offboard and self.setpoint_count == 10:
                 self.publish_vehicle_command(VehicleCommand.VEHICLE_CMD_DO_SET_MODE, 1.0, 6.0)
@@ -298,6 +377,11 @@ def main() -> None:
             armed = self.vehicle_status.arming_state == VehicleStatus.ARMING_STATE_ARMED
             offboard = self.vehicle_status.nav_state == VehicleStatus.NAVIGATION_STATE_OFFBOARD
             return bool(armed and offboard)
+
+        def publish_telemetry(self, now: float) -> None:
+            msg = String()
+            msg.data = telemetry_to_json(self.autonomy.telemetry(now))
+            self.telemetry_pub.publish(msg)
 
     rclpy.init()
     node = Px4AutonomyNode()

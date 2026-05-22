@@ -76,6 +76,33 @@ It is installed as:
 ros2 launch auto_drone gazebo_px4_autonomy.launch.py
 ```
 
+Recommended startup order on the Ubuntu simulator host:
+
+```bash
+# Terminal 1: PX4 + Gazebo depth-camera model
+cd ~/PX4-Autopilot
+make px4_sitl gz_x500_depth
+
+# Terminal 2: PX4 DDS bridge
+source /opt/ros/humble/setup.bash
+MicroXRCEAgent udp4 -p 8888
+
+# Terminal 3: auto_drone autonomy node
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
+ros2 launch auto_drone gazebo_px4_autonomy.launch.py
+```
+
+The same sequence is encoded in `scripts/px4_gazebo_autonomy_smoke.sh` for repeatable host checks:
+
+```bash
+PX4_DIR=~/PX4-Autopilot \
+WORKSPACE_SETUP=~/ros2_ws/install/setup.bash \
+scripts/px4_gazebo_autonomy_smoke.sh
+```
+
+Use `--dry-run` first to confirm paths and commands without starting processes.
+
 The launch expects PX4 SITL and the Gazebo/ROS bridge to provide:
 
 - `/camera/image`
@@ -90,6 +117,8 @@ The launch expects PX4 SITL and the Gazebo/ROS bridge to provide:
 Configuration lives in `config/px4_autonomy.yaml`. The package also installs `worlds/px4_reconstruction_world.sdf`, a PX4-oriented reconstruction arena with bounded obstacles and an RGB-D reference sensor. PX4 model spawning and bridge startup remain external so the mapper/planner is not tied to a specific PX4 checkout layout.
 
 The autonomy core uses ENU metric coordinates internally. PX4 odometry and setpoints are converted at the ROS node boundary: PX4 NED position and yaw become internal ENU `MetricPose`, and internal velocity/yaw commands are converted back to PX4 NED `TrajectorySetpoint` fields. RGB-D depth pixels are interpreted in camera optical convention, then converted to local forward-left-up voxel rays before mapping.
+
+See [docs/gazebo_setup.md](docs/gazebo_setup.md) for the fuller PX4/Gazebo runbook, topic checks, and host assumptions.
 
 ## Architecture
 

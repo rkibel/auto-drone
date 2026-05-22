@@ -16,6 +16,13 @@ The public setup intentionally avoids host-specific SSH, display, and credential
 - `ros_gz_bridge`
 - A working display for Gazebo GUI when using rendering-backed sensors such as GPU lidar
 
+PX4-specific additions for the RGB-D autonomy path:
+
+- PX4-Autopilot checkout with Gazebo simulation support and the `gz_x500_depth` target available
+- `px4_msgs` built in the same ROS 2 workspace overlay as `auto_drone`, matching the PX4 checkout's message definitions
+- Micro XRCE-DDS Agent available as `MicroXRCEAgent` and compatible with PX4's uXRCE-DDS client
+- UDP port `8888` free on the simulator host for PX4 DDS traffic
+
 ## Build
 
 From the ROS workspace root:
@@ -170,12 +177,65 @@ The package installs:
 - `worlds/px4_reconstruction_world.sdf`
 - `auto_drone px4_autonomy_node`
 
-Run the autonomy node after PX4 SITL, Gazebo, and the required bridges are active:
+### Startup Runbook
+
+Use the PX4-managed depth-camera model first. It is the lowest-friction path because PX4 owns model spawning, vehicle plugins, and the Gazebo/PX4 coupling:
+
+```bash
+# Terminal 1: PX4 SITL and Gazebo
+cd ~/PX4-Autopilot
+make px4_sitl gz_x500_depth
+```
+
+Start the DDS agent in a second terminal. PX4 SITL normally starts its uXRCE-DDS client automatically for ROS 2, and the agent makes the `/fmu/*` topics visible to ROS:
+
+```bash
+source /opt/ros/humble/setup.bash
+MicroXRCEAgent udp4 -p 8888
+```
+
+Build and source the ROS workspace that contains `px4_msgs` and `auto_drone`:
+
+```bash
+source /opt/ros/humble/setup.bash
+cd ~/ros2_ws
+colcon build --symlink-install --packages-select px4_msgs auto_drone
+source install/setup.bash
+```
+
+If PX4's camera topics do not already match the repository defaults, add `ros_gz_bridge` remaps so the autonomy launch sees:
+
+```text
+/camera/image
+/camera/depth/image
+/camera/depth/camera_info
+```
+
+Then start the autonomy node:
 
 ```bash
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 ros2 launch auto_drone gazebo_px4_autonomy.launch.py
+```
+
+For repeatable host validation, use the smoke runner from the repository root:
+
+```bash
+PX4_DIR=~/PX4-Autopilot \
+WORKSPACE_SETUP=$PWD/install/setup.bash \
+scripts/px4_gazebo_autonomy_smoke.sh --dry-run
+```
+
+Remove `--dry-run` once PX4, `MicroXRCEAgent`, and the ROS workspace overlay are confirmed. The script starts the XRCE agent, starts `make px4_sitl gz_x500_depth`, and then launches `auto_drone` with cleanup traps for the child processes.
+
+For local topic names that differ from the defaults, pass launch overrides rather than editing the config:
+
+```bash
+ros2 launch auto_drone gazebo_px4_autonomy.launch.py \
+  rgb_topic:=/your/rgb/topic \
+  depth_topic:=/your/depth/topic \
+  camera_info_topic:=/your/camera_info/topic
 ```
 
 Required topics:
@@ -191,6 +251,17 @@ Required topics:
 /fmu/in/vehicle_command
 ```
 
+Smoke checks before enabling motion:
+
+```bash
+ros2 topic echo /fmu/out/vehicle_odometry --once
+ros2 topic echo /fmu/out/vehicle_status --once
+ros2 topic echo /camera/depth/camera_info --once
+ros2 topic hz /camera/depth/image
+```
+
+The autonomy log should show depth frames being integrated, a current pose, planned targets, and offboard/arming warnings when PX4 rejects mode changes. If `/fmu/out/*` topics are missing, check the XRCE agent and `px4_msgs` version before changing `auto_drone`.
+
 By default the node uses PX4 odometry as the pose source. To use visual SLAM, publish `geometry_msgs/msg/PoseStamped` and set `slam_pose_topic` plus `use_slam_pose:=true` in `config/px4_autonomy.yaml` or as launch overrides. If PX4 does not report armed offboard mode after setpoints begin, the node logs a preflight/mode warning instead of silently failing.
 
 Frame conventions:
@@ -199,3 +270,31 @@ Frame conventions:
 - PX4 `VehicleOdometry` and `TrajectorySetpoint` are treated as NED at the node boundary.
 - Depth image pixels are treated as camera optical frame samples and converted to local forward-left-up voxel rays before log-odds integration.
 - Camera extrinsics are not estimated in v1; mount the RGB-D optical frame forward-facing with the vehicle, or publish a SLAM pose that already represents the sensor/body frame expected by the mapper.
+
+### Custom Reconstruction World
+
+`worlds/px4_reconstruction_world.sdf` is a repository-owned reconstruction arena, not a complete PX4 vehicle model. Treat it as the environment to merge into a PX4-supported Gazebo world or to load in PX4 standalone Gazebo mode once the host's PX4/Gazebo version is pinned.
+
+The intended validation sequence is:
+
+```bash
+# Terminal 1: PX4 waits for an external Gazebo server
+cd ~/PX4-Autopilot
+PX4_GZ_STANDALONE=1 make px4_sitl gz_x500_depth
+
+# Terminal 2: start a Gazebo server with a PX4-compatible world/model setup
+gz sim -r /path/to/px4_reconstruction_world_with_x500_depth.sdf
+```
+
+This custom-world flow is intentionally not baked into `gazebo_px4_autonomy.launch.py` yet. Keep PX4 spawning and Gazebo bridge wiring outside the `auto_drone` launch until the Ubuntu simulator host proves a repeatable model path, camera topic names, and world-file layout.
+
+### External Assumptions
+
+These assumptions cannot be validated from a macOS checkout and must be confirmed on the Ubuntu simulator host:
+
+- PX4, Gazebo, and ROS 2 versions are mutually compatible. Current PX4 docs use the `gz_*` Gazebo targets, while this repository's lidar proxy docs still target Gazebo Fortress/Ignition naming.
+- `make px4_sitl gz_x500_depth` publishes depth/RGB/camera-info topics that can be bridged or remapped to `/camera/image`, `/camera/depth/image`, and `/camera/depth/camera_info`.
+- The PX4 uXRCE-DDS client connects to `MicroXRCEAgent udp4 -p 8888` and exposes `/fmu/out/vehicle_odometry` plus `/fmu/out/vehicle_status`.
+- The Micro XRCE-DDS Agent version is compatible with the PX4 checkout's uXRCE-DDS client.
+- The workspace `px4_msgs` package matches the PX4 SITL checkout. Mismatches can deserialize incorrectly even when topic names look correct.
+- The RGB-D camera optical frame is forward-facing relative to the body frame expected by `auto_drone`, or a SLAM pose source compensates for that extrinsic.
