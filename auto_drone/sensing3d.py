@@ -5,12 +5,13 @@ from math import sqrt
 from random import Random
 
 from auto_drone.common import OBSTACLE, clamp
-from auto_drone.geometry3d import Pose3D, sensor_rays3d
+from auto_drone.geometry3d import Pose3D, project_local_cells, rotate_local_offset, sensor_rays3d
 
 
 @dataclass(frozen=True)
 class RangeMeasurement:
     ray: tuple[tuple[int, int, int], ...]
+    # Local sensor-frame cells observed along this ray, truncated at the hit or world boundary.
     cells: tuple[tuple[int, int, int], ...]
     hit: bool
     hit_cell: tuple[int, int, int] | None
@@ -20,16 +21,8 @@ class RangeMeasurement:
 
 @dataclass(frozen=True)
 class RangeFrame:
-    true_pose: Pose3D
     estimated_pose: Pose3D
     measurements: tuple[RangeMeasurement, ...]
-
-    @property
-    def true_visible_cells(self) -> set[tuple[int, int, int]]:
-        cells = {(self.true_pose.x, self.true_pose.y, self.true_pose.z)}
-        for measurement in self.measurements:
-            cells.update(measurement.cells)
-        return cells
 
     @property
     def mean_reprojection_error(self) -> float:
@@ -48,18 +41,19 @@ def generate_range_frame(
     random: Random,
 ) -> RangeFrame:
     measurements = []
-    for ray in sensor_rays3d(radius, round(fov, 6), round(true_pose.pitch, 6), round(true_pose.yaw, 6)):
+    for ray in sensor_rays3d(radius, round(fov, 6), 0.0, 0.0):
         cells = []
         hit_cell = None
         for dx, dy, dz in ray:
-            x = true_pose.x + dx
-            y = true_pose.y + dy
-            z = true_pose.z + dz
+            ox, oy, oz = rotate_local_offset(dx, dy, dz, true_pose.pitch, true_pose.yaw)
+            x = true_pose.x + ox
+            y = true_pose.y + oy
+            z = true_pose.z + oz
             if not world.in_bounds(x, y, z):
                 break
-            cells.append((x, y, z))
+            cells.append((dx, dy, dz))
             if world.cell(x, y, z) == OBSTACLE:
-                hit_cell = (x, y, z)
+                hit_cell = (dx, dy, dz)
                 break
 
         if not cells:
@@ -74,7 +68,7 @@ def generate_range_frame(
                 hit_cell = cells[-1]
 
         end = hit_cell if hit_cell else cells[-1]
-        distance = sqrt((end[0] - true_pose.x) ** 2 + (end[1] - true_pose.y) ** 2 + (end[2] - true_pose.z) ** 2)
+        distance = sqrt(end[0] ** 2 + end[1] ** 2 + end[2] ** 2)
         distance_error = random.uniform(0.0, noise * 2.0)
         pose_error = pose_delta_magnitude(true_pose, estimated_pose) * 0.08
         grazing_error = 0.10 if hit and distance > radius * 0.75 else 0.0
@@ -90,7 +84,14 @@ def generate_range_frame(
             )
         )
 
-    return RangeFrame(true_pose=true_pose, estimated_pose=estimated_pose, measurements=tuple(measurements))
+    return RangeFrame(estimated_pose=estimated_pose, measurements=tuple(measurements))
+
+
+def observed_cells_from_pose(pose: Pose3D, frame: RangeFrame) -> set[tuple[int, int, int]]:
+    cells = {(pose.x, pose.y, pose.z)}
+    for measurement in frame.measurements:
+        cells.update(project_local_cells(pose, measurement.cells))
+    return cells
 
 
 def pose_delta_magnitude(a: Pose3D, b: Pose3D) -> float:

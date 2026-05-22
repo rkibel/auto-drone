@@ -9,7 +9,7 @@ from auto_drone.common import FREE, OBSTACLE, UNKNOWN, angle_delta, clamp
 from auto_drone.geometry3d import Pose3D, orientation_cost, orientation_to, sensor_rays3d
 from auto_drone.mapping3d import integrate_range_frame
 from auto_drone.odometry3d import NoisyOdometry
-from auto_drone.sensing3d import RangeFrame, generate_range_frame
+from auto_drone.sensing3d import RangeFrame, generate_range_frame, observed_cells_from_pose
 from auto_drone.slam3d import PoseGraph
 
 
@@ -224,7 +224,7 @@ class ActiveMappingSim3D:
             self.random,
         )
         self.last_range_frame = frame
-        self.visible_cells = frame.true_visible_cells
+        self.visible_cells = observed_cells_from_pose(self.pose, frame)
         self.mapped_cells = integrate_range_frame(self.belief, frame)
         self.last_mean_reprojection_error = frame.mean_reprojection_error
         self.pose_graph.maybe_add_keyframe(
