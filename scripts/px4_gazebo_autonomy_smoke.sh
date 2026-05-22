@@ -101,6 +101,11 @@ configure_gazebo_env() {
   export PX4_GZ_WORLD
 
   if [[ -n "$GZ_PREFIX" ]]; then
+    if [[ -d "$GZ_PREFIX/share/gz" && -w "$GZ_PREFIX/share/gz" ]]; then
+      while IFS= read -r -d '' yaml_file; do
+        sed -i "s#library_path: /usr/lib/ruby/gz/#library_path: $GZ_PREFIX/lib/ruby/gz/#" "$yaml_file"
+      done < <(find "$GZ_PREFIX/share/gz" -maxdepth 1 -name "*.yaml" -type f -print0)
+    fi
     export PATH="$GZ_PREFIX/bin:$HOME/.local/bin:$PATH"
     export CMAKE_PREFIX_PATH="$GZ_PREFIX:${CMAKE_PREFIX_PATH:-}"
     export PKG_CONFIG_PATH="$GZ_PREFIX/lib/x86_64-linux-gnu/pkgconfig:$GZ_PREFIX/share/pkgconfig:${PKG_CONFIG_PATH:-}"
