@@ -229,6 +229,19 @@ scripts/px4_gazebo_autonomy_smoke.sh --dry-run
 
 Remove `--dry-run` once PX4, `MicroXRCEAgent`, and the ROS workspace overlay are confirmed. The script starts the XRCE agent, starts `make px4_sitl gz_x500_depth`, and then launches `auto_drone` with cleanup traps for the child processes.
 
+If Gazebo is installed into a user-writable prefix instead of `/usr`, set `GZ_PREFIX` so the script exports the required binary, library, Ruby command, system-plugin, physics-plugin, and model paths. For rootless PX4/Gazebo validation on hosts like `noa`, use a fixed Gazebo transport endpoint and standalone server mode:
+
+```bash
+PX4_DIR=~/PX4-Autopilot-v1.15 \
+WORKSPACE_SETUP=~/auto-drone-validation-ws/install/setup.bash \
+GZ_PREFIX=~/gz_user_prefix/usr \
+GZ_IP=127.0.0.1 \
+GZ_PARTITION=auto_drone_px4 \
+PX4_GZ_STANDALONE=1 \
+START_GZ_SERVER=1 \
+scripts/px4_gazebo_autonomy_smoke.sh
+```
+
 For local topic names that differ from the defaults, pass launch overrides rather than editing the config:
 
 ```bash

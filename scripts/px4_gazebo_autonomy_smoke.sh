@@ -7,6 +7,12 @@ WORKSPACE_SETUP="${WORKSPACE_SETUP:-$PWD/install/setup.bash}"
 PX4_TARGET="${PX4_TARGET:-gz_x500_depth}"
 XRCE_PORT="${XRCE_PORT:-8888}"
 AUTONOMY_LAUNCH="${AUTONOMY_LAUNCH:-auto_drone gazebo_px4_autonomy.launch.py}"
+GZ_PREFIX="${GZ_PREFIX:-}"
+GZ_IP="${GZ_IP:-127.0.0.1}"
+GZ_PARTITION="${GZ_PARTITION:-auto_drone_px4}"
+PX4_GZ_WORLD="${PX4_GZ_WORLD:-default}"
+PX4_GZ_STANDALONE="${PX4_GZ_STANDALONE:-0}"
+START_GZ_SERVER="${START_GZ_SERVER:-0}"
 DRY_RUN=0
 SKIP_PX4=0
 SKIP_AGENT=0
@@ -22,6 +28,12 @@ Environment:
   PX4_TARGET=$PX4_TARGET
   XRCE_PORT=$XRCE_PORT
   AUTONOMY_LAUNCH=$AUTONOMY_LAUNCH
+  GZ_PREFIX=$GZ_PREFIX
+  GZ_IP=$GZ_IP
+  GZ_PARTITION=$GZ_PARTITION
+  PX4_GZ_WORLD=$PX4_GZ_WORLD
+  PX4_GZ_STANDALONE=$PX4_GZ_STANDALONE
+  START_GZ_SERVER=$START_GZ_SERVER
 USAGE
 }
 
@@ -70,6 +82,27 @@ require_file "$WORKSPACE_SETUP"
 require_cmd bash
 require_cmd ros2
 
+configure_gazebo_env() {
+  export GZ_IP
+  export GZ_PARTITION
+  export PX4_GZ_WORLD
+
+  if [[ -n "$GZ_PREFIX" ]]; then
+    export PATH="$GZ_PREFIX/bin:$HOME/.local/bin:$PATH"
+    export CMAKE_PREFIX_PATH="$GZ_PREFIX:${CMAKE_PREFIX_PATH:-}"
+    export PKG_CONFIG_PATH="$GZ_PREFIX/lib/x86_64-linux-gnu/pkgconfig:$GZ_PREFIX/share/pkgconfig:${PKG_CONFIG_PATH:-}"
+    export LD_LIBRARY_PATH="$GZ_PREFIX/lib/x86_64-linux-gnu:$GZ_PREFIX/lib/x86_64-linux-gnu/gz-sim-8/plugins:$GZ_PREFIX/lib/x86_64-linux-gnu/gz-physics-7/engine-plugins:${LD_LIBRARY_PATH:-}"
+    export GZ_CONFIG_PATH="$GZ_PREFIX/share/gz:${GZ_CONFIG_PATH:-}"
+    export RUBYLIB="$GZ_PREFIX/lib/ruby:$GZ_PREFIX/lib/x86_64-linux-gnu/ruby:${RUBYLIB:-}"
+    export GZ_SIM_SYSTEM_PLUGIN_PATH="$GZ_PREFIX/lib/x86_64-linux-gnu/gz-sim-8/plugins:$GZ_PREFIX/lib/x86_64-linux-gnu:${GZ_SIM_SYSTEM_PLUGIN_PATH:-}"
+    export GZ_SIM_PHYSICS_ENGINE_PATH="$GZ_PREFIX/lib/x86_64-linux-gnu/gz-physics-7/engine-plugins:$GZ_PREFIX/lib/x86_64-linux-gnu/gz-physics-6/engine-plugins:${GZ_SIM_PHYSICS_ENGINE_PATH:-}"
+  fi
+
+  if [[ -d "$PX4_DIR/Tools/simulation/gz/models" ]]; then
+    export GZ_SIM_RESOURCE_PATH="$PX4_DIR/Tools/simulation/gz/models:$PX4_DIR/Tools/simulation/gz/worlds:${GZ_SIM_RESOURCE_PATH:-}"
+  fi
+}
+
 if [[ "$SKIP_PX4" -eq 0 ]]; then
   if [[ ! -d "$PX4_DIR" ]]; then
     if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -89,8 +122,14 @@ if [[ "$SKIP_PX4" -eq 0 ]]; then
   fi
 fi
 
+configure_gazebo_env
+
 if [[ "$SKIP_AGENT" -eq 0 ]]; then
   require_cmd MicroXRCEAgent
+fi
+
+if [[ "$SKIP_PX4" -eq 0 && ("$START_GZ_SERVER" -eq 1 || "$PX4_GZ_STANDALONE" == "1") ]]; then
+  require_cmd gz
 fi
 
 PIDS=()
@@ -113,9 +152,19 @@ if [[ "$SKIP_AGENT" -eq 0 ]]; then
 fi
 
 if [[ "$SKIP_PX4" -eq 0 ]]; then
+  if [[ "$START_GZ_SERVER" -eq 1 || "$PX4_GZ_STANDALONE" == "1" ]]; then
+    export PX4_GZ_STANDALONE=1
+    echo "+ gz sim -r -s $PX4_DIR/Tools/simulation/gz/worlds/$PX4_GZ_WORLD.sdf"
+    if [[ "$DRY_RUN" -eq 0 ]]; then
+      gz sim -r -s "$PX4_DIR/Tools/simulation/gz/worlds/$PX4_GZ_WORLD.sdf" &
+      PIDS+=("$!")
+      sleep 8
+    fi
+  fi
+
   echo "+ cd $PX4_DIR && make px4_sitl $PX4_TARGET"
   if [[ "$DRY_RUN" -eq 0 ]]; then
-    (cd "$PX4_DIR" && PATH="$HOME/.local/bin:$PATH" make px4_sitl "$PX4_TARGET") &
+    (cd "$PX4_DIR" && make px4_sitl "$PX4_TARGET") &
     PIDS+=("$!")
     sleep 12
   fi

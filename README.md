@@ -101,6 +101,17 @@ WORKSPACE_SETUP=~/ros2_ws/install/setup.bash \
 scripts/px4_gazebo_autonomy_smoke.sh
 ```
 
+On hosts that use a user-local Gazebo install, point `GZ_PREFIX` at the extracted prefix. If PX4 needs Gazebo started separately, enable the standalone mode:
+
+```bash
+PX4_DIR=~/PX4-Autopilot-v1.15 \
+WORKSPACE_SETUP=~/auto-drone-validation-ws/install/setup.bash \
+GZ_PREFIX=~/gz_user_prefix/usr \
+PX4_GZ_STANDALONE=1 \
+START_GZ_SERVER=1 \
+scripts/px4_gazebo_autonomy_smoke.sh
+```
+
 Use `--dry-run` first to confirm paths and commands without starting processes.
 
 The launch expects PX4 SITL and the Gazebo/ROS bridge to provide:
