@@ -43,7 +43,7 @@ OBSOLETE_PATTERNS = {
     "obsolete 2d test": re.compile(r"\btest_core2d\b"),
 }
 
-EXPECTED_ENTRY_POINTS = {"headless_3d_runner"}
+EXPECTED_ENTRY_POINTS = {"gazebo_lidar_bridge", "headless_3d_runner"}
 GENERATED_SUFFIXES = {".pyc", ".pyo", ".mp4", ".log"}
 GENERATED_NAMES = {"__pycache__", ".pytest_cache"}
 

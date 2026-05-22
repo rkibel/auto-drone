@@ -25,6 +25,39 @@ source install/setup.bash
 ros2 run auto_drone headless_3d_runner -- --max-steps 1500
 ```
 
+## Gazebo Drone Reconstruction Demo
+
+The Gazebo integration world is a drone-reconstruction proxy: a quadrotor-shaped inspection vehicle, elevated lidar, odometry, `/cmd_vel` control, and a self-contained neighborhood scene with trees, houses, fences, poles, wires, parked vehicles, and multi-height reconstruction obstacles. It keeps the current mapper-facing contract:
+
+```text
+Gazebo /scan + /odom -> RangeFrame -> BeliefVolume
+```
+
+Start the Gazebo world:
+
+```bash
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+export IGN_IP=127.0.0.1
+ign gazebo -r worlds/drone_reconstruction_world.sdf
+```
+
+Then start the bridge and mapper from another terminal:
+
+```bash
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+export IGN_IP=127.0.0.1
+ros2 launch auto_drone gazebo_lidar_demo.launch.py
+```
+
+Move the proxy vehicle with:
+
+```bash
+ros2 topic pub /cmd_vel geometry_msgs/msg/Twist \
+  "{linear: {x: 0.45}, angular: {z: 0.25}}" -r 5
+```
+
 ## Architecture
 
 The active mapping loop is structured like a future simulator bridge:
@@ -38,7 +71,7 @@ hidden voxel world
 -> belief-volume planner
 ```
 
-The mapper does not receive direct true occupancy. It receives range-frame measurements with ray cells, hit/miss state, range, and a residual-like measurement error. Low-residual measurements update the belief volume more strongly; high-residual measurements leave more uncertainty.
+The mapper does not receive direct true occupancy or true pose. It receives range-frame measurements with local sensor-frame ray cells, hit/miss state, range, and a residual-like measurement error, then projects those cells from the estimated pose. Low-residual measurements update the belief volume more strongly; high-residual measurements leave more uncertainty.
 
 Important modules:
 

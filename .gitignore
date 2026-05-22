@@ -8,3 +8,9 @@ frames*_profile/
 __pycache__/
 *.pyc
 .pytest_cache/
+.venv/
+*.egg-info/
+.codex_*_key
+scripts/*.local.sh
+docs/*local*.md
+docs/*private*.md

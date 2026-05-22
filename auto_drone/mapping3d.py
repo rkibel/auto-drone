@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from auto_drone.common import clamp
+from auto_drone.geometry3d import project_local_cells
 from auto_drone.sensing3d import RangeFrame
 
 
@@ -8,7 +9,7 @@ def integrate_range_frame(belief, frame: RangeFrame) -> set[tuple[int, int, int]
     mapped_cells = {(frame.estimated_pose.x, frame.estimated_pose.y, frame.estimated_pose.z)}
     for measurement in frame.measurements:
         confidence = confidence_from_reprojection_error(measurement.reprojection_error)
-        estimated_cells = cells_from_estimated_pose(frame.estimated_pose, measurement.cells, frame.true_pose)
+        estimated_cells = cells_from_estimated_pose(frame.estimated_pose, measurement.cells)
         if not estimated_cells:
             continue
 
@@ -35,9 +36,6 @@ def confidence_from_reprojection_error(error: float) -> float:
 
 
 def cells_from_estimated_pose(
-    estimated_pose, true_cells: tuple[tuple[int, int, int], ...], true_pose
+    estimated_pose, local_cells: tuple[tuple[int, int, int], ...]
 ) -> list[tuple[int, int, int]]:
-    dx = estimated_pose.x - true_pose.x
-    dy = estimated_pose.y - true_pose.y
-    dz = estimated_pose.z - true_pose.z
-    return [(x + dx, y + dy, z + dz) for x, y, z in true_cells]
+    return project_local_cells(estimated_pose, local_cells)

@@ -39,6 +39,29 @@ def forward_vector(yaw: float, pitch: float) -> tuple[float, float, float]:
     return cp * cos(yaw), cp * sin(yaw), sin(pitch)
 
 
+def rotate_local_offset(dx: int, dy: int, dz: int, pitch: float, yaw: float) -> tuple[int, int, int]:
+    cp = cos(pitch)
+    sp = sin(pitch)
+    cy = cos(yaw)
+    sy = sin(yaw)
+
+    pitched_x = cp * dx - sp * dz
+    pitched_z = sp * dx + cp * dz
+    world_x = cy * pitched_x - sy * dy
+    world_y = sy * pitched_x + cy * dy
+    return round(world_x), round(world_y), round(pitched_z)
+
+
+def project_local_cells(pose: Pose3D, local_cells: tuple[tuple[int, int, int], ...]) -> list[tuple[int, int, int]]:
+    cells = []
+    for dx, dy, dz in local_cells:
+        ox, oy, oz = rotate_local_offset(dx, dy, dz, pose.pitch, pose.yaw)
+        cell = (pose.x + ox, pose.y + oy, pose.z + oz)
+        if not cells or cells[-1] != cell:
+            cells.append(cell)
+    return cells
+
+
 @lru_cache(maxsize=512)
 def sensor_rays3d(
     radius: int, fov: float, pitch: float, yaw: float
