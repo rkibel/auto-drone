@@ -3,6 +3,7 @@ from struct import pack
 
 from auto_drone.autonomy3d import choose_discovery_plan, inflated_occupied_voxels, reachable_safe_voxels
 from auto_drone.core3d import BeliefVolume
+from auto_drone.frames3d import enu_velocity_to_ned, px4_ned_pose_to_metric, yaw_enu_to_ned, yaw_ned_to_enu, yaw_rate_enu_to_ned
 from auto_drone.interfaces3d import CameraIntrinsics, MetricPose, PoseSample, VoxelGridSpec, command_toward_pose
 from auto_drone.mapping3d import integrate_range_frame
 from auto_drone.px4_autonomy_node import AutonomyConfig, ClosedLoopAutonomy
@@ -99,6 +100,15 @@ def test_command_adapter_clamps_velocity_and_yaw_rate():
     assert isclose(command.velocity[1], 1.6)
     assert command.yaw_rate == -0.5
     assert not command.reached
+
+
+def test_px4_ned_and_internal_enu_frame_conversions():
+    pose = px4_ned_pose_to_metric(3.0, 2.0, -1.0, yaw_ned=0.0)
+    assert pose == MetricPose(2.0, 3.0, 1.0, yaw=pi / 2.0)
+    assert enu_velocity_to_ned(2.0, 3.0, 1.0) == (3.0, 2.0, -1.0)
+    assert yaw_ned_to_enu(0.0) == pi / 2.0
+    assert yaw_enu_to_ned(pi / 2.0) == 0.0
+    assert yaw_rate_enu_to_ned(0.4) == -0.4
 
 
 def test_pose_source_adapters_expose_latest_samples():

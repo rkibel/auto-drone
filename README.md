@@ -89,6 +89,8 @@ The launch expects PX4 SITL and the Gazebo/ROS bridge to provide:
 
 Configuration lives in `config/px4_autonomy.yaml`. The package also installs `worlds/px4_reconstruction_world.sdf`, a PX4-oriented reconstruction arena with bounded obstacles and an RGB-D reference sensor. PX4 model spawning and bridge startup remain external so the mapper/planner is not tied to a specific PX4 checkout layout.
 
+The autonomy core uses ENU metric coordinates internally. PX4 odometry and setpoints are converted at the ROS node boundary: PX4 NED position and yaw become internal ENU `MetricPose`, and internal velocity/yaw commands are converted back to PX4 NED `TrajectorySetpoint` fields. RGB-D depth pixels are interpreted in camera optical convention, then converted to local forward-left-up voxel rays before mapping.
+
 ## Architecture
 
 The active mapping loop is structured like a future simulator bridge:
@@ -110,6 +112,7 @@ Important modules:
 - `geometry3d.py`: pose, orientation, cached 3D rays, voxel lines
 - `sensing3d.py`: synthetic range/depth frame generation
 - `interfaces3d.py`: metric pose, voxel-grid, camera, pose-source, and command target data contracts
+- `frames3d.py`: PX4 NED/internal ENU and camera-frame conversion helpers
 - `pose_sources.py`: PX4 odometry and ROS SLAM pose-source adapters
 - `rgbd_mapping.py`: RGB-D/depth image conversion into local range-frame rays
 - `odometry3d.py`: noisy estimated pose tracking

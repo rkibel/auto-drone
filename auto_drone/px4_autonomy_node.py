@@ -5,6 +5,7 @@ from math import atan2
 
 from auto_drone.autonomy3d import DiscoveryPlan, choose_discovery_plan
 from auto_drone.core3d import BeliefVolume
+from auto_drone.frames3d import enu_velocity_to_ned, px4_ned_pose_to_metric, yaw_enu_to_ned, yaw_rate_enu_to_ned
 from auto_drone.interfaces3d import CameraIntrinsics, MetricPose, PoseSample, VoxelGridSpec, command_toward_pose
 from auto_drone.mapping3d import integrate_range_frame
 from auto_drone.pose_sources import Px4OdomPoseSource, RosSlamPoseSource
@@ -220,10 +221,10 @@ def main() -> None:
             if self.use_slam_pose:
                 return
             q = msg.q
-            yaw = yaw_from_quaternion(q[1], q[2], q[3], q[0])
+            yaw_ned = yaw_from_quaternion(q[1], q[2], q[3], q[0])
             position = msg.position
             self.autonomy.update_pose(
-                self.px4_pose_source.update(MetricPose(position[0], position[1], position[2], yaw=yaw), self.now_sec())
+                self.px4_pose_source.update(px4_ned_pose_to_metric(position[0], position[1], position[2], yaw_ned), self.now_sec())
             )
 
         def on_slam_pose(self, msg: PoseStamped) -> None:
@@ -259,9 +260,10 @@ def main() -> None:
 
             setpoint = TrajectorySetpoint()
             setpoint.timestamp = mode.timestamp
-            setpoint.velocity = [float(command.velocity[0]), float(command.velocity[1]), float(command.velocity[2])]
-            setpoint.yaw = float(command.pose.yaw)
-            setpoint.yawspeed = float(command.yaw_rate)
+            vx_ned, vy_ned, vz_ned = enu_velocity_to_ned(*command.velocity)
+            setpoint.velocity = [float(vx_ned), float(vy_ned), float(vz_ned)]
+            setpoint.yaw = float(yaw_enu_to_ned(command.pose.yaw))
+            setpoint.yawspeed = float(yaw_rate_enu_to_ned(command.yaw_rate))
             self.setpoint_pub.publish(setpoint)
             self.setpoint_count += 1
             if self.arm_and_offboard and self.setpoint_count == 10:

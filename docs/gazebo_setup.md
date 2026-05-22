@@ -192,3 +192,10 @@ Required topics:
 ```
 
 By default the node uses PX4 odometry as the pose source. To use visual SLAM, publish `geometry_msgs/msg/PoseStamped` and set `slam_pose_topic` plus `use_slam_pose:=true` in `config/px4_autonomy.yaml` or as launch overrides. If PX4 does not report armed offboard mode after setpoints begin, the node logs a preflight/mode warning instead of silently failing.
+
+Frame conventions:
+
+- The mapper and planner use ENU metric coordinates.
+- PX4 `VehicleOdometry` and `TrajectorySetpoint` are treated as NED at the node boundary.
+- Depth image pixels are treated as camera optical frame samples and converted to local forward-left-up voxel rays before log-odds integration.
+- Camera extrinsics are not estimated in v1; mount the RGB-D optical frame forward-facing with the vehicle, or publish a SLAM pose that already represents the sensor/body frame expected by the mapper.
