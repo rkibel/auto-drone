@@ -47,3 +47,19 @@ The eventual simulator bridge should replace only the data source, not the mappe
 ## Current Implementation Target
 
 This milestone implements stages 1-4 with synthetic data, while preserving the current fast voxel planner and renderer.
+
+## PX4 RGB-D Closed-Loop Milestone
+
+The next implemented milestone adds the simulator-facing loop without replacing the lightweight voxel map:
+
+```text
+PX4 SITL + Gazebo RGB-D
+-> depth image ray conversion
+-> bounded BeliefVolume
+-> safe discovery planning
+-> PX4 offboard setpoints
+```
+
+The core data contracts are `MetricPose`, `VoxelGridSpec`, `SensorFrame3D`, `PoseSample`, and `CommandTarget`. The ROS node defaults to PX4 odometry as a pose source, and accepts a `PoseStamped` SLAM topic when `use_slam_pose` is enabled. RGB frames are subscribed and timestamped so visual SLAM can be connected without changing the mapper/planner boundary; depth frames provide deterministic free/occupied voxel evidence for v1.
+
+Frame boundaries are explicit in v1: `frames3d.py` converts PX4 NED odometry/setpoints to and from the internal ENU map frame, and `rgbd_mapping.py` converts camera optical depth pixels into forward-left-up local voxel rays. Camera extrinsic calibration remains a simulator setup constraint rather than an estimated state.

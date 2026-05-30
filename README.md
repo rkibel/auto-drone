@@ -58,6 +58,108 @@ ros2 topic pub /cmd_vel geometry_msgs/msg/Twist \
   "{linear: {x: 0.45}, angular: {z: 0.25}}" -r 5
 ```
 
+## PX4 RGB-D Autonomy Path
+
+The PX4 v1 path adds the closed-loop simulator-facing pipeline:
+
+```text
+Gazebo RGB-D + PX4 odometry or SLAM pose
+-> depth ray RangeFrame
+-> BeliefVolume
+-> discovery planner
+-> PX4 offboard velocity setpoints
+```
+
+It is installed as:
+
+```bash
+ros2 launch auto_drone gazebo_px4_autonomy.launch.py
+```
+
+For a composed simulator bringup that also starts Gazebo, PX4 SITL, Micro XRCE Agent, camera bridges, and the autonomy node:
+
+```bash
+ros2 launch auto_drone gazebo_px4_full_stack.launch.py \
+  px4_dir:=~/PX4-Autopilot-v1.15 \
+  px4_gz_standalone:=true \
+  start_gz_server:=true \
+  start_rviz:=true
+```
+
+The full-stack launch is intended for repeatable simulator hosts. It can start Micro XRCE-DDS Agent, Gazebo, PX4 SITL, the RGB-D bridge, the autonomy node, and RViz. Keep using `gazebo_px4_autonomy.launch.py` when PX4, Gazebo, and topic bridges are supervised externally.
+
+If a rootless/headless Gazebo install exposes camera topics but does not emit render-sensor frames, keep PX4/Gazebo in the loop and enable the synthetic RGB-D fallback:
+
+```bash
+ros2 launch auto_drone gazebo_px4_full_stack.launch.py \
+  px4_dir:=~/PX4-Autopilot-v1.15 \
+  start_camera_bridge:=false \
+  start_synthetic_rgbd:=true \
+  depth_timeout_sec:=2.0 \
+  start_rviz:=true
+```
+
+This is a validation fallback for constrained simulator hosts; real Gazebo RGB-D remains the default.
+
+Recommended startup order on the Ubuntu simulator host:
+
+```bash
+# Terminal 1: PX4 + Gazebo depth-camera model
+cd ~/PX4-Autopilot
+make px4_sitl gz_x500_depth
+
+# Terminal 2: PX4 DDS bridge
+source /opt/ros/humble/setup.bash
+MicroXRCEAgent udp4 -p 8888
+
+# Terminal 3: auto_drone autonomy node
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
+ros2 launch auto_drone gazebo_px4_autonomy.launch.py
+```
+
+The same sequence is encoded in `scripts/px4_gazebo_autonomy_smoke.sh` for repeatable host checks:
+
+```bash
+PX4_DIR=~/PX4-Autopilot \
+WORKSPACE_SETUP=~/ros2_ws/install/setup.bash \
+scripts/px4_gazebo_autonomy_smoke.sh
+```
+
+On hosts that use a user-local Gazebo install, point `GZ_PREFIX` at the extracted prefix. If PX4 needs Gazebo started separately, enable the standalone mode:
+
+```bash
+PX4_DIR=~/PX4-Autopilot-v1.15 \
+WORKSPACE_SETUP=~/auto-drone-validation-ws/install/setup.bash \
+GZ_PREFIX=~/gz_user_prefix/usr \
+GZ_USE_XVFB=1 \
+GZ_RENDER_ENGINE=ogre \
+PX4_GZ_STANDALONE=1 \
+START_GZ_SERVER=1 \
+scripts/px4_gazebo_autonomy_smoke.sh
+```
+
+Use `--dry-run` first to confirm paths and commands without starting processes.
+
+The launch expects PX4 SITL and the Gazebo/ROS bridge to provide:
+
+- `/camera/image`
+- `/camera/depth/image`
+- `/camera/depth/camera_info`
+- `/fmu/out/vehicle_odometry`
+- `/fmu/out/vehicle_status`
+- `/fmu/in/offboard_control_mode`
+- `/fmu/in/trajectory_setpoint`
+- `/fmu/in/vehicle_command`
+
+The autonomy node publishes `/auto_drone_px4_autonomy/status` as JSON telemetry and `/auto_drone_px4_autonomy/markers` as RViz `MarkerArray` visualization. In RViz, `known_free` cells are blue, occupied cells are red, frontier/discovery cells are yellow, the planned path is green, the target is magenta, and the current drone pose is cyan. Marker snapshots default to 1 Hz so the 10 Hz offboard control loop is not blocked by full-volume visualization scans.
+
+Configuration lives in `config/px4_autonomy.yaml`. The package also installs `config/gz_rgbd_bridge.yaml` for the default PX4 `gz_x500_depth` `/camera`, `/depth_camera`, and `/camera_info` bridge, plus `worlds/px4_reconstruction_world.sdf`, a PX4-oriented reconstruction arena with bounded obstacles and an RGB-D reference sensor. PX4 model spawning, RGB-D topic names, and bridge startup are launch-configurable so the mapper/planner is not tied to a specific PX4 checkout layout.
+
+The autonomy core uses ENU metric coordinates internally. PX4 odometry and setpoints are converted at the ROS node boundary: PX4 NED position and yaw become internal ENU `MetricPose`, and internal velocity/yaw commands are converted back to PX4 NED `TrajectorySetpoint` fields. RGB-D depth pixels are interpreted in camera optical convention, then converted to local forward-left-up voxel rays before mapping. Before the depth mapper is ready, the node publishes bounded takeoff/hold setpoints so PX4 can enter offboard mode and climb to the configured exploration altitude instead of waiting on the ground.
+
+See [docs/gazebo_setup.md](docs/gazebo_setup.md) for the fuller PX4/Gazebo runbook, topic checks, and host assumptions.
+
 ## Architecture
 
 The active mapping loop is structured like a future simulator bridge:
@@ -78,9 +180,15 @@ Important modules:
 - `common.py`: shared occupancy constants, angle math, clamping, color blending
 - `geometry3d.py`: pose, orientation, cached 3D rays, voxel lines
 - `sensing3d.py`: synthetic range/depth frame generation
+- `interfaces3d.py`: metric pose, voxel-grid, camera, pose-source, and command target data contracts
+- `frames3d.py`: PX4 NED/internal ENU and camera-frame conversion helpers
+- `pose_sources.py`: PX4 odometry and ROS SLAM pose-source adapters
+- `rgbd_mapping.py`: RGB-D/depth image conversion into local range-frame rays
 - `odometry3d.py`: noisy estimated pose tracking
 - `mapping3d.py`: range-frame integration into the belief volume
 - `slam3d.py`: keyframes and relative-pose constraints
+- `autonomy3d.py`: safe discovery planning on bounded belief volumes
+- `px4_autonomy_node.py`: ROS 2/PX4 closed-loop autonomy node
 - `core3d.py`: seeded voxel world, belief volume, active mapping loop, planner
 - `render3d.py`: isometric voxel rendering
 - `headless_3d_runner.py`: CLI runner and video generation
