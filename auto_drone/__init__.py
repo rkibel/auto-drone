@@ -1,1 +1,1 @@
-"""Headless active mapping simulator for a simplified autonomous drone."""
+"""ROS 2 package surface for the auto-drone autonomy demo."""

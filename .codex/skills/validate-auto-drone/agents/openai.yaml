@@ -1,4 +1,0 @@
-interface:
-  display_name: "Validate Auto Drone"
-  short_description: "Validate auto-drone health and speed."
-  default_prompt: "Validate the auto-drone repository for correctness, real-time performance, and mapping efficiency; fix issues and rerun checks until clean."

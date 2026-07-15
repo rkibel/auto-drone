@@ -8,9 +8,14 @@ frames*_profile/
 __pycache__/
 *.pyc
 .pytest_cache/
-.venv/
 *.egg-info/
 .codex_*_key
 scripts/*.local.sh
 docs/*local*.md
 docs/*private*.md
+
+# Local upstream PX4 checkout. Keep this as its own Git repository instead of
+# vendoring gigabytes of PX4 source and generated SITL artifacts into auto-drone.
+/vendor/PX4-Autopilot/
+/vendor/px4_msgs/
+/vendor/Micro-XRCE-DDS-Agent/
